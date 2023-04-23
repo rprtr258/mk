@@ -36,42 +36,60 @@ type Option[T any] struct {
 }
 
 type Task struct {
-	docstring    Option[string]
-	dependencies []Resource
-	produces     []Resource
-	action       string
+	Docstring    Option[string]
+	Dependencies []Resource
+	Produces     []Resource
+	Action       func() error
 }
 
 type Tasks = map[string]Task
 
-func build(t string, tasks Tasks) {
+func Build(t string, tasks Tasks) error {
 	task, ok := tasks[t]
 	if !ok {
-		fmt.Printf("%q task was not found\n", t)
-		return
+		return fmt.Errorf("%q task was not found\n", t)
 	}
 
-	for _, kk := range task.dependencies {
+	for _, kk := range task.Dependencies {
 		switch tt := kk.(type) {
 		case TaskResource:
-			build(string(tt), tasks)
+			if err := Build(string(tt), tasks); err != nil {
+				return fmt.Errorf("build %q for %q: %w", tt, t, err)
+			}
 		}
 	}
-	fmt.Println(task.action)
+	return task.Action()
+}
+
+func ShellAction(cmd string) func() error {
+	return func() error {
+		fmt.Printf("executing %q in shell...\n", cmd)
+		return nil
+	}
 }
 
 func main() {
 	example := Tasks{
-		"compile": {docstring: Option[string]{"build executable", true}, dependencies: []Resource{FileResource("main.go")}, produces: []Resource{FileResource("mk")}, action: "go build -o mk main.go"},
-		"run":     {docstring: Option[string]{"run main", true}, dependencies: []Resource{TaskResource("compile")}, produces: nil, action: "./mk"},
+		"compile": {
+			Docstring:    Option[string]{"build executable", true},
+			Dependencies: []Resource{FileResource("main.go")},
+			Produces:     []Resource{FileResource("mk")},
+			Action:       ShellAction("go build -o mk main.go"),
+		},
+		"run": {
+			Docstring:    Option[string]{"run main", true},
+			Dependencies: []Resource{TaskResource("compile")},
+			Produces:     nil,
+			Action:       ShellAction("./mk"),
+		},
 	}
 
 	fmt.Println("a::")
-	build("a", example)
+	Build("a", example)
 
 	fmt.Println("\ncompile::")
-	build("compile", example)
+	Build("compile", example)
 
 	fmt.Println("\nrun::")
-	build("run", example)
+	Build("run", example)
 }
