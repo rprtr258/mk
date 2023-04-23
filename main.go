@@ -1,6 +1,45 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+)
+
+type ResourceKeyKind int
+
+const (
+	ResourceKeyKindFile ResourceKeyKind = iota
+	ResourceKeyKindPackage
+	ResourceKeyKindTask
+	ResourceKeyKindString
+	ResourceKeyKindInt
+)
+
+func (kind ResourceKeyKind) String() string {
+	switch kind {
+	case ResourceKeyKindFile:
+		return "file"
+	case ResourceKeyKindPackage:
+		return "package"
+	case ResourceKeyKindTask:
+		return "task"
+	case ResourceKeyKindString:
+		return "string"
+	case ResourceKeyKindInt:
+		return "int"
+	default:
+		return "<unknown>"
+	}
+}
+
+type ResourceKey struct {
+	Key  string
+	Kind ResourceKeyKind
+}
+
+func (key ResourceKey) String() string {
+	return fmt.Sprintf("#%s: %v", key.Key, key.Kind)
+}
 
 type Resource interface {
 	isResource()
@@ -35,66 +74,172 @@ type Option[T any] struct {
 	Valid bool
 }
 
-type Task struct {
-	Docstring    Option[string]
-	Dependencies []Resource
-	Produces     []Resource
-	Action       func() error
+func (o Option[T]) String() string {
+	if !o.Valid {
+		return "None"
+	}
+
+	return fmt.Sprintf("Some(%v)", o.Value)
 }
 
-type Tasks = map[string]Task
+type Task struct {
+	Description  Option[string]
+	Dependencies []ResourceKey
+	Produces     []ResourceKey
+	Action       func([]Resource) ([]Resource, error)
+}
 
-func Build(t string, tasks Tasks) error {
-	task, ok := tasks[t]
+type System struct {
+	Tasks map[string]Task
+	// TODO: separate by resource type?
+	Resources map[ResourceKey]Resource
+}
+
+func Build(taskKey string, system System) ([]Resource, error) {
+	log.Println("building", taskKey, "...")
+
+	task, ok := system.Tasks[taskKey]
 	if !ok {
-		return fmt.Errorf("%q task was not found\n", t)
+		return nil, fmt.Errorf("%q task was not found\n", taskKey)
 	}
 
 	for _, kk := range task.Dependencies {
-		switch tt := kk.(type) {
-		case TaskResource:
-			if err := Build(string(tt), tasks); err != nil {
-				return fmt.Errorf("build %q for %q: %w", tt, t, err)
+		switch kk.Kind {
+		case ResourceKeyKindTask:
+			if _, err := Build(kk.Key, system); err != nil {
+				return nil, fmt.Errorf("build %q for %q: %w", kk.Key, taskKey, err)
 			}
 		}
 	}
 
-	if err := task.Action(); err != nil {
-		return fmt.Errorf("build %q: %w", t, err)
+	dependencies := make([]Resource, len(task.Dependencies))
+	for i, resourceKey := range task.Dependencies {
+		resource, ok := system.Resources[resourceKey]
+		if !ok {
+			return nil, fmt.Errorf("resource %v not yet built/not found/can't be built", resourceKey)
+		}
+
+		dependencies[i] = resource
+	}
+	resources, err := task.Action(dependencies)
+	if err != nil {
+		return nil, fmt.Errorf("build %q: %w", taskKey, err)
 	}
 
-	return nil
+	for i, resourceKey := range task.Produces {
+		system.Resources[resourceKey] = resources[i]
+	}
+
+	return resources, nil
 }
 
-func ShellAction(cmd string) func() error {
-	return func() error {
+func ShellAction(cmd string) func([]Resource) ([]Resource, error) {
+	return func([]Resource) ([]Resource, error) {
 		fmt.Printf("executing %q in shell...\n", cmd)
-		return nil
+		return nil, nil
 	}
 }
 
 func main() {
-	example := Tasks{
-		"compile": {
-			Docstring:    Option[string]{"build executable", true},
-			Dependencies: []Resource{FileResource("main.go")},
-			Produces:     []Resource{FileResource("mk")},
-			Action:       ShellAction("go build -o mk main.go"),
-		},
-		"run": {
-			Docstring:    Option[string]{"run main", true},
-			Dependencies: []Resource{TaskResource("compile")},
-			Produces:     nil,
-			Action:       ShellAction("./mk"),
-		},
+	example := System{
+		Tasks:     map[string]Task{},
+		Resources: map[ResourceKey]Resource{},
+	}
+	a := "aaakek"
+	b := "aaalel"
+	for i, c := range a {
+		example.Resources[ResourceKey{Key: fmt.Sprintf("a%d", i), Kind: ResourceKeyKindString}] = StringResource(string(c))
+	}
+	for i, c := range b {
+		example.Resources[ResourceKey{Key: fmt.Sprintf("b%d", i), Kind: ResourceKeyKindString}] = StringResource(string(c))
+	}
+	for i := 0; i < len(a); i++ {
+		for j := 0; j < len(b); j++ {
+			var task Task
+			switch {
+			case j == 0:
+				task = Task{
+					Description:  Option[string]{},
+					Dependencies: nil,
+					Produces:     []ResourceKey{{Key: fmt.Sprintf("c%d %d", i, j), Kind: ResourceKeyKindInt}},
+					Action: func([]Resource) ([]Resource, error) {
+						return []Resource{IntResource(i)}, nil
+					},
+				}
+			case i == 0:
+				task = Task{
+					Description:  Option[string]{},
+					Dependencies: nil,
+					Produces:     []ResourceKey{{Key: fmt.Sprintf("c%d %d", i, j), Kind: ResourceKeyKindInt}},
+					Action: func([]Resource) ([]Resource, error) {
+						return []Resource{IntResource(j)}, nil
+					},
+				}
+			default:
+				task = Task{
+					Description: Option[string]{},
+					Dependencies: []ResourceKey{
+						{Key: fmt.Sprintf("a%d", i), Kind: ResourceKeyKindString},
+						{Key: fmt.Sprintf("b%d", j), Kind: ResourceKeyKindString},
+						// TODO: change to int resources
+						{Key: fmt.Sprintf("c%d %d", i-1, j-1), Kind: ResourceKeyKindTask}, // replace
+						{Key: fmt.Sprintf("c%d %d", i, j-1), Kind: ResourceKeyKindTask},   // insert
+						{Key: fmt.Sprintf("c%d %d", i-1, j), Kind: ResourceKeyKindTask},   // delete
+					},
+					Produces: []ResourceKey{{Key: fmt.Sprintf("c%d %d", i, j), Kind: ResourceKeyKindInt}},
+					Action: func(rs []Resource) ([]Resource, error) {
+						ac := rs[0].(StringResource)
+						bc := rs[1].(StringResource)
+						replace := rs[2].(IntResource)
+						if ac == bc {
+							return []Resource{IntResource(1 + int(replace))}, nil
+						}
+
+						insert := rs[3].(IntResource)
+						delete := rs[4].(IntResource)
+
+						/// min ///
+						x := replace
+						if insert < x {
+							x = insert
+						}
+						if delete < x {
+							x = delete
+						}
+
+						return []Resource{IntResource(1 + x)}, nil
+					},
+				}
+			}
+			example.Tasks[fmt.Sprintf("c%d %d", i, j)] = task
+		}
+	}
+	for k, v := range example.Tasks {
+		fmt.Println(k, v)
+	}
+	if _, err := Build("c5 5", example); err != nil {
+		log.Fatal(err.Error())
 	}
 
-	fmt.Println("a::")
-	Build("a", example)
+	// "compile": {
+	// 	Docstring:    Option[string]{"build executable", true},
+	// 	Dependencies: []Resource{FileResource("main.go")},
+	// 	Produces:     []Resource{FileResource("mk")},
+	// 	Action:       ShellAction("go build -o mk main.go"),
+	// },
+	// "run": {
+	// 	Docstring:    Option[string]{"run main", true},
+	// 	Dependencies: []Resource{TaskResource("compile")},
+	// 	Produces:     nil,
+	// 	Action:       ShellAction("./mk"),
+	// },
 
-	fmt.Println("\ncompile::")
-	Build("compile", example)
+	// fmt.Println("a::")
+	// Build("a", example)
 
-	fmt.Println("\nrun::")
-	Build("run", example)
+	// fmt.Println("\ncompile::")
+	// Build("compile", example)
+
+	// fmt.Println("\nrun::")
+	// Build("run", example)
 }
