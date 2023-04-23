@@ -96,7 +96,7 @@ type System struct {
 }
 
 func Build(taskKey string, system System) ([]Resource, error) {
-	log.Println("building", taskKey, "...")
+	// log.Println("building", taskKey, "...")
 
 	task, ok := system.Tasks[taskKey]
 	if !ok {
@@ -112,14 +112,19 @@ func Build(taskKey string, system System) ([]Resource, error) {
 		}
 	}
 
-	dependencies := make([]Resource, len(task.Dependencies))
-	for i, resourceKey := range task.Dependencies {
+	dependencies := make([]Resource, 0, len(task.Dependencies))
+	for _, resourceKey := range task.Dependencies {
+		if resourceKey.Kind == ResourceKeyKindTask {
+			// just execute task, no deps added
+			continue
+		}
+
 		resource, ok := system.Resources[resourceKey]
 		if !ok {
 			return nil, fmt.Errorf("resource %v not yet built/not found/can't be built", resourceKey)
 		}
 
-		dependencies[i] = resource
+		dependencies = append(dependencies, resource)
 	}
 	resources, err := task.Action(dependencies)
 	if err != nil {
@@ -154,7 +159,11 @@ func main() {
 		example.Resources[ResourceKey{Key: fmt.Sprintf("b%d", i), Kind: ResourceKeyKindString}] = StringResource(string(c))
 	}
 	for i := 0; i < len(a); i++ {
+		i := i
+
 		for j := 0; j < len(b); j++ {
+			j := j
+
 			var task Task
 			switch {
 			case j == 0:
@@ -181,10 +190,15 @@ func main() {
 					Dependencies: []ResourceKey{
 						{Key: fmt.Sprintf("a%d", i), Kind: ResourceKeyKindString},
 						{Key: fmt.Sprintf("b%d", j), Kind: ResourceKeyKindString},
-						// TODO: change to int resources
-						{Key: fmt.Sprintf("c%d %d", i-1, j-1), Kind: ResourceKeyKindTask}, // replace
-						{Key: fmt.Sprintf("c%d %d", i, j-1), Kind: ResourceKeyKindTask},   // insert
-						{Key: fmt.Sprintf("c%d %d", i-1, j), Kind: ResourceKeyKindTask},   // delete
+
+						{Key: fmt.Sprintf("c%d %d", i-1, j-1), Kind: ResourceKeyKindInt}, // replace
+						{Key: fmt.Sprintf("c%d %d", i, j-1), Kind: ResourceKeyKindInt},   // insert
+						{Key: fmt.Sprintf("c%d %d", i-1, j), Kind: ResourceKeyKindInt},   // delete
+
+						// TODO: remove task resources
+						{Key: fmt.Sprintf("c%d %d", i-1, j-1), Kind: ResourceKeyKindTask},
+						{Key: fmt.Sprintf("c%d %d", i, j-1), Kind: ResourceKeyKindTask},
+						{Key: fmt.Sprintf("c%d %d", i-1, j), Kind: ResourceKeyKindTask},
 					},
 					Produces: []ResourceKey{{Key: fmt.Sprintf("c%d %d", i, j), Kind: ResourceKeyKindInt}},
 					Action: func(rs []Resource) ([]Resource, error) {
@@ -192,13 +206,13 @@ func main() {
 						bc := rs[1].(StringResource)
 						replace := rs[2].(IntResource)
 						if ac == bc {
-							return []Resource{IntResource(1 + int(replace))}, nil
+							return []Resource{replace}, nil
 						}
 
 						insert := rs[3].(IntResource)
 						delete := rs[4].(IntResource)
 
-						/// min ///
+						/// x = min(replace, insert, delete) ///
 						x := replace
 						if insert < x {
 							x = insert
@@ -214,11 +228,17 @@ func main() {
 			example.Tasks[fmt.Sprintf("c%d %d", i, j)] = task
 		}
 	}
+
 	for k, v := range example.Tasks {
 		fmt.Println(k, v)
 	}
+	fmt.Println()
+
 	if _, err := Build("c5 5", example); err != nil {
 		log.Fatal(err.Error())
+	}
+	for k, v := range example.Resources {
+		fmt.Println(k, v)
 	}
 
 	// "compile": {
