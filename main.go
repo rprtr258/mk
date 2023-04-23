@@ -58,7 +58,12 @@ func Build(t string, tasks Tasks) error {
 			}
 		}
 	}
-	return task.Action()
+
+	if err := task.Action(); err != nil {
+		return fmt.Errorf("build %q: %w", t, err)
+	}
+
+	return nil
 }
 
 func ShellAction(cmd string) func() error {
