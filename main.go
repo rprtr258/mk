@@ -60,7 +60,7 @@ type System struct {
 }
 
 func Build(taskKey string, system System) ([]Resource, error) {
-	// log.Println("building", taskKey, "...")
+	log.Println("building", taskKey, "...")
 
 	task, ok := system.Tasks[taskKey]
 	if !ok {
@@ -197,17 +197,18 @@ func main() {
 		}
 	}
 
-	for k, v := range example.Tasks {
-		fmt.Println(k, v)
-	}
-	fmt.Println()
+	// for k, v := range example.Tasks {
+	// 	fmt.Println(k, v)
+	// }
+	// fmt.Println()
 
 	if _, err := Build("c5 5", example); err != nil {
 		log.Fatal(err.Error())
 	}
-	for k, v := range example.Resources {
-		fmt.Println(k, v)
-	}
+
+	// for k, v := range example.Resources {
+	// 	fmt.Println(k, v)
+	// }
 
 	// "compile": {
 	// 	Docstring:    Option[string]{"build executable", true},
