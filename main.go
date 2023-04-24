@@ -47,7 +47,10 @@ func (o Option[T]) String() string {
 }
 
 type ResourceKey fmt.Stringer
-type Fetcher func(ResourceKey) (Resource, error)
+type Fetcher interface {
+	Int(ResourceKey) (int, error)
+	String(ResourceKey) (string, error)
+}
 
 type Task struct {
 	Description Option[string]
@@ -61,45 +64,88 @@ type System struct {
 	Resources map[ResourceKey]Resource
 }
 
-func Build(taskKey string, system System) ([]Resource, error) {
-	task, ok := system.Tasks[taskKey]
+func (s System) bake(key ResourceKey) error {
+	for taskKey2, task2 := range s.Tasks {
+		for _, product := range task2.Produces {
+			if product.String() == key.String() {
+				// log.Printf("building %q to get %v for %q\n", taskKey2, key, taskKey)
+				if _, err := s.Build(taskKey2); err != nil {
+					// return 0, fmt.Errorf("build %q for %q to get %v: %w", taskKey2, taskKey, key, err)
+					return fmt.Errorf("build %q to get %v: %w", taskKey2, key, err)
+				}
+
+				// TODO: check key is produced
+				return nil
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s System) Int(key ResourceKey) (int, error) {
+	// TODO: optimize
+	// already evaluated
+	for resourceKey, resource := range s.Resources {
+		if resourceKey.String() == key.String() {
+			// already done, skip
+			return int(resource.(IntResource)), nil
+		}
+	}
+
+	if err := s.bake(key); err != nil {
+		return 0, err
+	}
+
+	// TODO: remove duplication
+	for resourceKey, resource := range s.Resources {
+		if resourceKey.String() == key.String() {
+			// already done, skip
+			return int(resource.(IntResource)), nil
+		}
+	}
+
+	return 0, fmt.Errorf("resource %v not yet built/not found/can't be built", key)
+}
+
+func (s System) String(key ResourceKey) (string, error) {
+	// TODO: optimize
+	// already evaluated
+	for resourceKey, resource := range s.Resources {
+		if resourceKey.String() == key.String() {
+			// already done, skip
+			return string(resource.(StringResource)), nil
+		}
+	}
+
+	if err := s.bake(key); err != nil {
+		return "", err
+	}
+
+	// TODO: remove duplication
+	for resourceKey, resource := range s.Resources {
+		if resourceKey.String() == key.String() {
+			// already done, skip
+			return string(resource.(StringResource)), nil
+		}
+	}
+
+	return "", fmt.Errorf("resource %v not yet built/not found/can't be built", key)
+}
+
+func (s System) Build(taskKey string) ([]Resource, error) {
+	task, ok := s.Tasks[taskKey]
 	if !ok {
 		return nil, fmt.Errorf("%q task was not found\n", taskKey)
 	}
 
-	resources, err := task.Action(func(key ResourceKey) (Resource, error) {
-		// TODO: optimize
-		// already evaluated
-		for resourceKey, resource := range system.Resources {
-			if resourceKey.String() == key.String() {
-				// already done, skip
-				return resource, nil
-			}
-		}
-
-		// evaluate from task
-		for taskKey2, task2 := range system.Tasks {
-			for _, product := range task2.Produces {
-				if product.String() == key.String() {
-					log.Printf("building %q to get %v for %q\n", taskKey2, key, taskKey)
-					if _, err := Build(taskKey2, system); err != nil {
-						return nil, fmt.Errorf("build %q for %q to get %v: %w", taskKey2, taskKey, key, err)
-					}
-
-					// TODO: check key is produced
-					return system.Resources[key], nil
-				}
-			}
-		}
-
-		return nil, fmt.Errorf("resource %v not yet built/not found/can't be built", key)
-	})
+	resources, err := task.Action(s)
 	if err != nil {
 		return nil, fmt.Errorf("build %q: %w", taskKey, err)
 	}
 
 	for i, resourceKey := range task.Produces {
-		system.Resources[resourceKey] = resources[i]
+		s.Resources[resourceKey] = resources[i]
 	}
 
 	return resources, nil
@@ -173,38 +219,38 @@ func main() {
 					Produces:    []ResourceKey{CKey{i, j}},
 					Action: func(fetch Fetcher) ([]Resource, error) {
 						defer log.Println("building", CKey{i, j}, "...")
-						ac, err := fetch(AKey(i))
+						ac, err := fetch.String(AKey(i))
 						if err != nil {
 							return nil, err
 						}
-						bc, err := fetch(BKey(j))
+						bc, err := fetch.String(BKey(j))
 						if err != nil {
 							return nil, err
 						}
-						replace, err := fetch(CKey{i - 1, j - 1})
+						replace, err := fetch.Int(CKey{i - 1, j - 1})
 						if err != nil {
 							return nil, err
 						}
 						if ac == bc {
-							return []Resource{replace}, nil
+							return []Resource{IntResource(replace)}, nil
 						}
 
-						insert, err := fetch(CKey{i, j - 1})
+						insert, err := fetch.Int(CKey{i, j - 1})
 						if err != nil {
 							return nil, err
 						}
-						delete, err := fetch(CKey{i - 1, j})
+						delete, err := fetch.Int(CKey{i - 1, j})
 						if err != nil {
 							return nil, err
 						}
 
 						/// x = min(replace, insert, delete) ///
-						x := replace.(IntResource)
-						if insert.(IntResource) < x {
-							x = insert.(IntResource)
+						x := replace
+						if insert < x {
+							x = insert
 						}
-						if delete.(IntResource) < x {
-							x = delete.(IntResource)
+						if delete < x {
+							x = delete
 						}
 
 						return []Resource{IntResource(1 + x)}, nil
@@ -220,7 +266,7 @@ func main() {
 	// }
 	// fmt.Println()
 
-	resources, err := Build("c5 5", example)
+	resources, err := example.Build("c5 5")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
