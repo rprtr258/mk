@@ -47,12 +47,12 @@ func (o Option[T]) String() string {
 }
 
 type ResourceKey fmt.Stringer
+type Fetcher func(ResourceKey) (Resource, error)
 
 type Task struct {
-	Description  Option[string]
-	Dependencies []ResourceKey
-	Produces     []ResourceKey
-	Action       func([]Resource) ([]Resource, error)
+	Description Option[string]
+	Produces    []ResourceKey
+	Action      func(Fetcher) ([]Resource, error)
 }
 
 type System struct {
@@ -67,42 +67,33 @@ func Build(taskKey string, system System) ([]Resource, error) {
 		return nil, fmt.Errorf("%q task was not found\n", taskKey)
 	}
 
-	for _, dependency := range task.Dependencies {
+	resources, err := task.Action(func(key ResourceKey) (Resource, error) {
 		// TODO: optimize
-		for resourceKey := range system.Resources {
-			if resourceKey.String() == dependency.String() {
+		// already evaluated
+		for resourceKey, resource := range system.Resources {
+			if resourceKey.String() == key.String() {
 				// already done, skip
-				goto DONE
+				return resource, nil
 			}
 		}
 
+		// evaluate from task
 		for taskKey2, task2 := range system.Tasks {
 			for _, product := range task2.Produces {
-				if product.String() == dependency.String() {
-					log.Printf("building %q to get %v for %q\n", taskKey2, dependency, taskKey)
+				if product.String() == key.String() {
+					log.Printf("building %q to get %v for %q\n", taskKey2, key, taskKey)
 					if _, err := Build(taskKey2, system); err != nil {
-						return nil, fmt.Errorf("build %q for %q to get %v: %w", taskKey2, taskKey, dependency, err)
+						return nil, fmt.Errorf("build %q for %q to get %v: %w", taskKey2, taskKey, key, err)
 					}
-					goto DONE
+
+					// TODO: check key is produced
+					return system.Resources[key], nil
 				}
 			}
 		}
 
-	DONE:
-	}
-
-	dependencies := make([]Resource, 0, len(task.Dependencies))
-	for _, resourceKey := range task.Dependencies {
-		resource, ok := system.Resources[resourceKey]
-		if !ok {
-			return nil, fmt.Errorf("resource %v not yet built/not found/can't be built", resourceKey)
-		}
-
-		dependencies = append(dependencies, resource)
-	}
-
-	log.Println("building", taskKey, "...")
-	resources, err := task.Action(dependencies)
+		return nil, fmt.Errorf("resource %v not yet built/not found/can't be built", key)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("build %q: %w", taskKey, err)
 	}
@@ -162,52 +153,58 @@ func main() {
 			switch {
 			case j == 0:
 				task = Task{
-					Description:  Option[string]{},
-					Dependencies: nil,
-					Produces:     []ResourceKey{CKey{i, j}},
-					Action: func([]Resource) ([]Resource, error) {
+					Description: Option[string]{},
+					Produces:    []ResourceKey{CKey{i, j}},
+					Action: func(Fetcher) ([]Resource, error) {
 						return []Resource{IntResource(i)}, nil
 					},
 				}
 			case i == 0:
 				task = Task{
-					Description:  Option[string]{},
-					Dependencies: nil,
-					Produces:     []ResourceKey{CKey{i, j}},
-					Action: func([]Resource) ([]Resource, error) {
+					Description: Option[string]{},
+					Produces:    []ResourceKey{CKey{i, j}},
+					Action: func(Fetcher) ([]Resource, error) {
 						return []Resource{IntResource(j)}, nil
 					},
 				}
 			default:
 				task = Task{
 					Description: Option[string]{},
-					Dependencies: []ResourceKey{
-						AKey(i),
-						BKey(j),
-
-						CKey{i - 1, j - 1}, // replace
-						CKey{i, j - 1},     // insert
-						CKey{i - 1, j},     // delete
-					},
-					Produces: []ResourceKey{CKey{i, j}},
-					Action: func(rs []Resource) ([]Resource, error) {
-						ac := rs[0].(StringResource)
-						bc := rs[1].(StringResource)
-						replace := rs[2].(IntResource)
+					Produces:    []ResourceKey{CKey{i, j}},
+					Action: func(fetch Fetcher) ([]Resource, error) {
+						defer log.Println("building", CKey{i, j}, "...")
+						ac, err := fetch(AKey(i))
+						if err != nil {
+							return nil, err
+						}
+						bc, err := fetch(BKey(j))
+						if err != nil {
+							return nil, err
+						}
+						replace, err := fetch(CKey{i - 1, j - 1})
+						if err != nil {
+							return nil, err
+						}
 						if ac == bc {
 							return []Resource{replace}, nil
 						}
 
-						insert := rs[3].(IntResource)
-						delete := rs[4].(IntResource)
+						insert, err := fetch(CKey{i, j - 1})
+						if err != nil {
+							return nil, err
+						}
+						delete, err := fetch(CKey{i - 1, j})
+						if err != nil {
+							return nil, err
+						}
 
 						/// x = min(replace, insert, delete) ///
-						x := replace
-						if insert < x {
-							x = insert
+						x := replace.(IntResource)
+						if insert.(IntResource) < x {
+							x = insert.(IntResource)
 						}
-						if delete < x {
-							x = delete
+						if delete.(IntResource) < x {
+							x = delete.(IntResource)
 						}
 
 						return []Resource{IntResource(1 + x)}, nil
