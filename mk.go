@@ -1,8 +1,7 @@
-package main
+package mk
 
 import (
 	"fmt"
-	"log"
 )
 
 type Resource interface {
@@ -158,148 +157,24 @@ func ShellAction(cmd string) func([]Resource) ([]Resource, error) {
 	}
 }
 
-type AKey int
+// "compile": {
+// 	Docstring:    Option[string]{"build executable", true},
+// 	Dependencies: []Resource{FileResource("main.go")},
+// 	Produces:     []Resource{FileResource("mk")},
+// 	Action:       ShellAction("go build -o mk main.go"),
+// },
+// "run": {
+// 	Docstring:    Option[string]{"run main", true},
+// 	Dependencies: []Resource{TaskResource("compile")},
+// 	Produces:     nil,
+// 	Action:       ShellAction("./mk"),
+// },
 
-func (a AKey) String() string {
-	return fmt.Sprintf("A[%d]", a)
-}
+// fmt.Println("a::")
+// Build("a", example)
 
-type BKey int
+// fmt.Println("\ncompile::")
+// Build("compile", example)
 
-func (b BKey) String() string {
-	return fmt.Sprintf("B[%d]", b)
-}
-
-type CKey [2]int
-
-func (c CKey) String() string {
-	return fmt.Sprintf("C[%d %d]", c[0], c[1])
-}
-
-func main() {
-	example := System{
-		Tasks:     map[string]Task{},
-		Resources: map[ResourceKey]Resource{},
-	}
-	a := "aaakek"
-	b := "aaalel"
-	for i, c := range a {
-		example.Resources[AKey(i)] = StringResource(string(c))
-	}
-	for i, c := range b {
-		example.Resources[BKey(i)] = StringResource(string(c))
-	}
-	for i := 0; i < len(a); i++ {
-		i := i
-
-		for j := 0; j < len(b); j++ {
-			j := j
-
-			var task Task
-			switch {
-			case j == 0:
-				task = Task{
-					Description: Option[string]{},
-					Produces:    []ResourceKey{CKey{i, j}},
-					Action: func(Fetcher) ([]Resource, error) {
-						return []Resource{IntResource(i)}, nil
-					},
-				}
-			case i == 0:
-				task = Task{
-					Description: Option[string]{},
-					Produces:    []ResourceKey{CKey{i, j}},
-					Action: func(Fetcher) ([]Resource, error) {
-						return []Resource{IntResource(j)}, nil
-					},
-				}
-			default:
-				task = Task{
-					Description: Option[string]{},
-					Produces:    []ResourceKey{CKey{i, j}},
-					Action: func(fetch Fetcher) ([]Resource, error) {
-						defer log.Println("building", CKey{i, j}, "...")
-						ac, err := fetch.String(AKey(i))
-						if err != nil {
-							return nil, err
-						}
-						bc, err := fetch.String(BKey(j))
-						if err != nil {
-							return nil, err
-						}
-						replace, err := fetch.Int(CKey{i - 1, j - 1})
-						if err != nil {
-							return nil, err
-						}
-						if ac == bc {
-							return []Resource{IntResource(replace)}, nil
-						}
-
-						insert, err := fetch.Int(CKey{i, j - 1})
-						if err != nil {
-							return nil, err
-						}
-						delete, err := fetch.Int(CKey{i - 1, j})
-						if err != nil {
-							return nil, err
-						}
-
-						/// x = min(replace, insert, delete) ///
-						x := replace
-						if insert < x {
-							x = insert
-						}
-						if delete < x {
-							x = delete
-						}
-
-						return []Resource{IntResource(1 + x)}, nil
-					},
-				}
-			}
-			example.Tasks[fmt.Sprintf("c%d %d", i, j)] = task
-		}
-	}
-
-	// for k, v := range example.Tasks {
-	// 	fmt.Println(k, v)
-	// }
-	// fmt.Println()
-
-	resources, err := example.Build("c5 5")
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-
-	fmt.Println("output resources:")
-	for _, v := range resources {
-		fmt.Printf("\t%v\n", v)
-	}
-
-	fmt.Println("all resources:")
-	for k, v := range example.Resources {
-		fmt.Printf("\t%7s: %v\n", k.String(), v)
-	}
-
-	// "compile": {
-	// 	Docstring:    Option[string]{"build executable", true},
-	// 	Dependencies: []Resource{FileResource("main.go")},
-	// 	Produces:     []Resource{FileResource("mk")},
-	// 	Action:       ShellAction("go build -o mk main.go"),
-	// },
-	// "run": {
-	// 	Docstring:    Option[string]{"run main", true},
-	// 	Dependencies: []Resource{TaskResource("compile")},
-	// 	Produces:     nil,
-	// 	Action:       ShellAction("./mk"),
-	// },
-
-	// fmt.Println("a::")
-	// Build("a", example)
-
-	// fmt.Println("\ncompile::")
-	// Build("compile", example)
-
-	// fmt.Println("\nrun::")
-	// Build("run", example)
-}
+// fmt.Println("\nrun::")
+// Build("run", example)
