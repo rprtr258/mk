@@ -31,8 +31,8 @@ var system = newSystem()
 
 func newSystem() mk.System {
 	system := mk.System{
-		Tasks:     map[string]mk.Task{},
 		Resources: map[mk.ResourceKey]mk.Resource{},
+		Tasks:     map[string]mk.Task{},
 	}
 	a := "aaakek"
 	b := "aaalel"

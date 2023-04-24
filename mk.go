@@ -58,9 +58,9 @@ type Task struct {
 }
 
 type System struct {
-	Tasks map[string]Task
 	// TODO: separate by resource type?
 	Resources map[ResourceKey]Resource
+	Tasks     map[string]Task
 }
 
 func (s System) bake(key ResourceKey) error {
@@ -150,31 +150,7 @@ func (s System) Build(taskKey string) ([]Resource, error) {
 	return resources, nil
 }
 
-func ShellAction(cmd string) func([]Resource) ([]Resource, error) {
-	return func([]Resource) ([]Resource, error) {
-		fmt.Printf("executing %q in shell...\n", cmd)
-		return nil, nil
-	}
+func ShellAction(cmd string) (stdout string, stderr string, err error) {
+	fmt.Printf("executing %q in shell...\n", cmd)
+	return "", "", nil
 }
-
-// "compile": {
-// 	Docstring:    Option[string]{"build executable", true},
-// 	Dependencies: []Resource{FileResource("main.go")},
-// 	Produces:     []Resource{FileResource("mk")},
-// 	Action:       ShellAction("go build -o mk main.go"),
-// },
-// "run": {
-// 	Docstring:    Option[string]{"run main", true},
-// 	Dependencies: []Resource{TaskResource("compile")},
-// 	Produces:     nil,
-// 	Action:       ShellAction("./mk"),
-// },
-
-// fmt.Println("a::")
-// Build("a", example)
-
-// fmt.Println("\ncompile::")
-// Build("compile", example)
-
-// fmt.Println("\nrun::")
-// Build("run", example)
