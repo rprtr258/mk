@@ -46,22 +46,22 @@ func (o Option[T]) String() string {
 	return fmt.Sprintf("Some(%v)", o.Value)
 }
 
+type ResourceKey fmt.Stringer
+
 type Task struct {
 	Description  Option[string]
-	Dependencies []any
-	Produces     []any
+	Dependencies []ResourceKey
+	Produces     []ResourceKey
 	Action       func([]Resource) ([]Resource, error)
 }
 
 type System struct {
 	Tasks map[string]Task
 	// TODO: separate by resource type?
-	Resources map[any]Resource
+	Resources map[ResourceKey]Resource
 }
 
 func Build(taskKey string, system System) ([]Resource, error) {
-	log.Println("building", taskKey, "...")
-
 	task, ok := system.Tasks[taskKey]
 	if !ok {
 		return nil, fmt.Errorf("%q task was not found\n", taskKey)
@@ -69,21 +69,25 @@ func Build(taskKey string, system System) ([]Resource, error) {
 
 	for _, dependency := range task.Dependencies {
 		// TODO: optimize
-		for _, resource := range system.Resources {
-			if resource == dependency {
+		for resourceKey := range system.Resources {
+			if resourceKey.String() == dependency.String() {
 				// already done, skip
 				goto DONE
 			}
 		}
-		for tk, t := range system.Tasks {
-			for _, tdep := range t.Produces {
-				if tdep == dependency {
-					if _, err := Build(tk, system); err != nil {
-						return nil, fmt.Errorf("build %q for %q to get %v: %w", tk, taskKey, dependency, err)
+
+		for taskKey2, task2 := range system.Tasks {
+			for _, product := range task2.Produces {
+				if product.String() == dependency.String() {
+					log.Printf("building %q to get %v for %q\n", taskKey2, dependency, taskKey)
+					if _, err := Build(taskKey2, system); err != nil {
+						return nil, fmt.Errorf("build %q for %q to get %v: %w", taskKey2, taskKey, dependency, err)
 					}
+					goto DONE
 				}
 			}
 		}
+
 	DONE:
 	}
 
@@ -96,6 +100,8 @@ func Build(taskKey string, system System) ([]Resource, error) {
 
 		dependencies = append(dependencies, resource)
 	}
+
+	log.Println("building", taskKey, "...")
 	resources, err := task.Action(dependencies)
 	if err != nil {
 		return nil, fmt.Errorf("build %q: %w", taskKey, err)
@@ -115,14 +121,29 @@ func ShellAction(cmd string) func([]Resource) ([]Resource, error) {
 	}
 }
 
+type AKey int
+
+func (a AKey) String() string {
+	return fmt.Sprintf("A[%d]", a)
+}
+
+type BKey int
+
+func (b BKey) String() string {
+	return fmt.Sprintf("B[%d]", b)
+}
+
+type CKey [2]int
+
+func (c CKey) String() string {
+	return fmt.Sprintf("C[%d %d]", c[0], c[1])
+}
+
 func main() {
 	example := System{
 		Tasks:     map[string]Task{},
-		Resources: map[any]Resource{},
+		Resources: map[ResourceKey]Resource{},
 	}
-	type AKey int
-	type BKey int
-	type CKey [2]int
 	a := "aaakek"
 	b := "aaalel"
 	for i, c := range a {
@@ -143,7 +164,7 @@ func main() {
 				task = Task{
 					Description:  Option[string]{},
 					Dependencies: nil,
-					Produces:     []any{CKey{i, j}},
+					Produces:     []ResourceKey{CKey{i, j}},
 					Action: func([]Resource) ([]Resource, error) {
 						return []Resource{IntResource(i)}, nil
 					},
@@ -152,7 +173,7 @@ func main() {
 				task = Task{
 					Description:  Option[string]{},
 					Dependencies: nil,
-					Produces:     []any{CKey{i, j}},
+					Produces:     []ResourceKey{CKey{i, j}},
 					Action: func([]Resource) ([]Resource, error) {
 						return []Resource{IntResource(j)}, nil
 					},
@@ -160,7 +181,7 @@ func main() {
 			default:
 				task = Task{
 					Description: Option[string]{},
-					Dependencies: []any{
+					Dependencies: []ResourceKey{
 						AKey(i),
 						BKey(j),
 
@@ -168,7 +189,7 @@ func main() {
 						CKey{i, j - 1},     // insert
 						CKey{i - 1, j},     // delete
 					},
-					Produces: []any{CKey{i, j}},
+					Produces: []ResourceKey{CKey{i, j}},
 					Action: func(rs []Resource) ([]Resource, error) {
 						ac := rs[0].(StringResource)
 						bc := rs[1].(StringResource)
