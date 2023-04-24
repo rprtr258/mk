@@ -220,13 +220,20 @@ func main() {
 	// }
 	// fmt.Println()
 
-	if _, err := Build("c5 5", example); err != nil {
+	resources, err := Build("c5 5", example)
+	if err != nil {
 		log.Fatal(err.Error())
 	}
 
-	// for k, v := range example.Resources {
-	// 	fmt.Println(k, v)
-	// }
+	fmt.Println("output resources:")
+	for _, v := range resources {
+		fmt.Printf("\t%v\n", v)
+	}
+
+	fmt.Println("all resources:")
+	for k, v := range example.Resources {
+		fmt.Printf("\t%7s: %v\n", k.String(), v)
+	}
 
 	// "compile": {
 	// 	Docstring:    Option[string]{"build executable", true},
