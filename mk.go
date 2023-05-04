@@ -1,7 +1,11 @@
 package mk
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 )
 
 type Resource interface {
@@ -150,7 +154,50 @@ func (s System) Build(taskKey string) ([]Resource, error) {
 	return resources, nil
 }
 
-func ShellAction(cmd string) (stdout string, stderr string, err error) {
-	fmt.Printf("executing %q in shell...\n", cmd)
-	return "", "", nil
+func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...string) error {
+	c := exec.Command(cmd, args...)
+	c.Env = append(os.Environ(), MapToSlice(env, func(k, v string) string {
+		return k + "=" + v
+	})...)
+	c.Stderr = stderr
+	c.Stdout = stdout
+	c.Stdin = os.Stdin
+
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("cmd %q %v: %w", cmd, args, err)
+	}
+
+	return nil
+}
+
+func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err error) {
+	fmt.Printf("executing %q %v...\n", cmd, args)
+
+	stdoutB := bytes.Buffer{}
+	stderrB := bytes.Buffer{}
+	if err := run(nil, &stdoutB, &stderrB, cmd, args...); err != nil {
+		return "", "", err
+	}
+
+	return stdoutB.String(), stderrB.String(), nil
+}
+
+func ShellScript(script string) (stdout string, stderr string, err error) {
+	return ShellCmd("/bin/sh", "-c", script)
+}
+
+func MapToSlice[K comparable, V, T any](dict map[K]V, f func(K, V) T) []T {
+	res := make([]T, 0, len(dict))
+	for k, v := range dict {
+		res = append(res, f(k, v))
+	}
+	return res
+}
+
+func Map[T, R any](slice []T, f func(T) R) []R {
+	res := make([]R, len(slice))
+	for i, elem := range slice {
+		res[i] = f(elem)
+	}
+	return res
 }
