@@ -173,10 +173,22 @@ func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...st
 func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err error) {
 	fmt.Printf("executing %q %v...\n", cmd, args)
 
+	absoluteCmd, err := exec.LookPath(cmd)
+	if err != nil {
+		return "", "", fmt.Errorf("not found %q: %w", cmd, err)
+	}
+
 	stdoutB := bytes.Buffer{}
 	stderrB := bytes.Buffer{}
-	if err := run(nil, &stdoutB, &stderrB, cmd, args...); err != nil {
-		return "", "", err
+	if err := run(nil, &stdoutB, &stderrB, absoluteCmd, args...); err != nil {
+		return "", "", fmt.Errorf(
+			"command failed %q %v stdout=%q stderr=%q: %w",
+			cmd,
+			args,
+			stdoutB.String(),
+			stderrB.String(),
+			err,
+		)
 	}
 
 	return stdoutB.String(), stderrB.String(), nil
