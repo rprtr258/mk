@@ -149,19 +149,3 @@ func (s System) Build(taskKey string) ([]Resource, error) {
 
 	return resources, nil
 }
-
-func MapToSlice[K comparable, V, T any](dict map[K]V, f func(K, V) T) []T {
-	res := make([]T, 0, len(dict))
-	for k, v := range dict {
-		res = append(res, f(k, v))
-	}
-	return res
-}
-
-func Map[T, R any](slice []T, f func(T) R) []R {
-	res := make([]R, len(slice))
-	for i, elem := range slice {
-		res[i] = f(elem)
-	}
-	return res
-}

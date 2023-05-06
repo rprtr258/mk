@@ -7,16 +7,20 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+
+	"github.com/rprtr258/fun"
 )
 
 func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...string) error {
 	c := exec.Command(cmd, args...)
-	c.Env = append(os.Environ(), MapToSlice(env, func(k, v string) string {
+	c.Env = append(os.Environ(), fun.ToSlice(env, func(k, v string) string {
 		return k + "=" + v
 	})...)
 	c.Stderr = stderr
 	c.Stdout = stdout
 	c.Stdin = os.Stdin
+
+	fmt.Printf("executing %q %v...\n", cmd, args)
 
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("cmd %q %v: %w", cmd, args, err)
@@ -26,8 +30,6 @@ func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...st
 }
 
 func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err error) {
-	fmt.Printf("executing %q %v...\n", cmd, args)
-
 	absoluteCmd, err := exec.LookPath(cmd)
 	if err != nil {
 		return "", "", fmt.Errorf("not found %q: %w", cmd, err)
