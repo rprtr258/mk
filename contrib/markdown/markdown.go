@@ -8,7 +8,7 @@ import (
 
 func Header(w io.Writer, level int, text string) {
 	sharps := strings.Repeat("#", level)
-	fmt.Fprintf(w, "%s %s", sharps, text)
+	fmt.Fprintf(w, "%s %s\n", sharps, text)
 }
 
 func H1(w io.Writer, text string) {
@@ -24,7 +24,7 @@ func H3(w io.Writer, text string) {
 }
 
 func Code(w io.Writer, lang, code string) {
-	fmt.Fprintf(w, "```%s\n%s\n```", lang, code)
+	fmt.Fprintf(w, "```%s\n%s\n```\n", lang, code)
 }
 
 func Table(w io.Writer, headers []string, rows [][]string) {
@@ -34,7 +34,7 @@ func Table(w io.Writer, headers []string, rows [][]string) {
 	}
 	fmt.Fprint(w, "|\n")
 
-	fmt.Fprint(w, strings.Repeat("|", len(headers)))
+	fmt.Fprint(w, strings.Repeat("|-", len(headers)))
 	fmt.Fprint(w, "|\n")
 
 	for _, rows := range rows {
