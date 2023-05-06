@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 )
@@ -196,6 +197,14 @@ func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err err
 
 func ShellScript(script string) (stdout string, stderr string, err error) {
 	return ShellCmd("/bin/sh", "-c", script)
+}
+
+func MkDir(dir string, perms fs.FileMode) error {
+	if err := os.MkdirAll(dir, perms); err != nil {
+		return fmt.Errorf("mkdir %q with perms=%v: %w", dir, perms, err)
+	}
+
+	return nil
 }
 
 func MapToSlice[K comparable, V, T any](dict map[K]V, f func(K, V) T) []T {
