@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
+	"github.com/rprtr258/log"
 	"github.com/rprtr258/mk"
 	"github.com/samber/lo"
 	"github.com/urfave/cli/v2"
@@ -69,7 +69,7 @@ func newSystem(a, b string) mk.System {
 					Description: mk.Option[string]{},
 					Produces:    []mk.ResourceKey{CKey{i, j}},
 					Action: func(fetch mk.Fetcher) ([]mk.Resource, error) {
-						defer log.Println("building", CKey{i, j}, "...")
+						defer log.Infof("building", log.F{"task": CKey{i, j}})
 						ac, err := fetch.String(AKey(i))
 						if err != nil {
 							return nil, err
