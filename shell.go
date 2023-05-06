@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/rprtr258/fun"
+	"github.com/rprtr258/log"
 )
 
 func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...string) error {
@@ -20,7 +22,7 @@ func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...st
 	c.Stdout = stdout
 	c.Stdin = os.Stdin
 
-	fmt.Printf("executing %q %v...\n", cmd, args)
+	log.Debugf("executing command", log.F{"cmd": cmd, "args": args})
 
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("cmd %q %v: %w", cmd, args, err)
@@ -48,7 +50,7 @@ func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err err
 		)
 	}
 
-	return stdoutB.String(), stderrB.String(), nil
+	return strings.TrimSpace(stdoutB.String()), stderrB.String(), nil
 }
 
 func ShellAlias(cmd string, args ...string) func(...string) (stdout string, stderr string, err error) {
