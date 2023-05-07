@@ -2,6 +2,7 @@ package mk
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,8 +14,8 @@ import (
 	"github.com/rprtr258/log"
 )
 
-func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...string) error {
-	c := exec.Command(cmd, args...)
+func run(ctx context.Context, env map[string]string, stdout, stderr io.Writer, cmd string, args ...string) error {
+	c := exec.CommandContext(ctx, cmd, args...)
 	c.Env = append(os.Environ(), fun.ToSlice(env, func(k, v string) string {
 		return k + "=" + v
 	})...)
@@ -31,7 +32,7 @@ func run(env map[string]string, stdout, stderr io.Writer, cmd string, args ...st
 	return nil
 }
 
-func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err error) {
+func ExecContext(ctx context.Context, cmd string, args ...string) (stdout string, stderr string, err error) {
 	absoluteCmd, err := exec.LookPath(cmd)
 	if err != nil {
 		return "", "", fmt.Errorf("not found %q: %w", cmd, err)
@@ -39,7 +40,7 @@ func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err err
 
 	stdoutB := bytes.Buffer{}
 	stderrB := bytes.Buffer{}
-	if err := run(nil, &stdoutB, &stderrB, absoluteCmd, args...); err != nil {
+	if err := run(ctx, nil, &stdoutB, &stderrB, absoluteCmd, args...); err != nil {
 		return "", "", fmt.Errorf(
 			"command failed %q %v stdout=%q stderr=%q: %w",
 			cmd,
@@ -53,14 +54,14 @@ func ShellCmd(cmd string, args ...string) (stdout string, stderr string, err err
 	return strings.TrimSpace(stdoutB.String()), stderrB.String(), nil
 }
 
-func ShellAlias(cmd string, args ...string) func(...string) (stdout string, stderr string, err error) {
-	return func(nargs ...string) (string, string, error) {
-		return ShellCmd(cmd, append(args, nargs...)...)
+func ExecAliasContext(cmd string, args ...string) func(context.Context, ...string) (stdout string, stderr string, err error) {
+	return func(ctx context.Context, nargs ...string) (string, string, error) {
+		return ExecContext(ctx, cmd, append(args, nargs...)...)
 	}
 }
 
-func ShellScript(script string) (stdout string, stderr string, err error) {
-	return ShellCmd("/bin/sh", "-c", script)
+func ShellScript(ctx context.Context, script string) (stdout string, stderr string, err error) {
+	return ExecContext(ctx, "/bin/sh", "-c", script)
 }
 
 func MkDir(dir string, perms fs.FileMode) error {
