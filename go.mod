@@ -3,10 +3,10 @@ module github.com/rprtr258/mk
 go 1.19
 
 require (
+	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/docker v20.10.24+incompatible
 	github.com/rprtr258/fun v0.0.2
 	github.com/rprtr258/log v0.0.4
-	github.com/samber/lo v1.38.1
 	github.com/urfave/cli/v2 v2.25.3
 	go.uber.org/multierr v1.11.0
 )

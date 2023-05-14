@@ -4,120 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/network"
 	dockerClient "github.com/docker/docker/client"
-	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
-	"github.com/samber/lo"
 	"github.com/urfave/cli/v2"
 )
-
-type Option[T any] struct {
-	Value T
-	Valid bool
-}
-
-type Port struct {
-	// Host IP address that the container's port is mapped to
-	IP Option[string]
-	// Port on the container
-	PrivatePort uint16
-	// Port exposed on the host
-	PublicPort Option[uint16]
-	Type       string
-}
-
-// EndpointIPAMConfig represents IPAM configurations for the endpoint
-type EndpointIPAMConfig struct {
-	IPv4Address  string
-	IPv6Address  string
-	LinkLocalIPs []string
-}
-
-// EndpointSettings stores the network endpoint details
-type EndpointSettings struct {
-	// Configurations
-	IPAMConfig *EndpointIPAMConfig
-	Links      []string
-	Aliases    []string
-	// Operational data
-	NetworkID           string
-	EndpointID          string
-	Gateway             string
-	IPAddress           string
-	IPPrefixLen         int
-	IPv6Gateway         string
-	GlobalIPv6Address   string
-	GlobalIPv6PrefixLen int
-	MacAddress          string
-	DriverOpts          map[string]string
-}
-
-type SummaryNetworkSettings struct {
-	Networks map[string]*EndpointSettings
-}
-
-// MountType represents the type of a mount
-type MountType string
-
-const (
-	MountTypeBind      MountType = "bind"   // MountTypeBind is the type for mounting host dir
-	MountTypeVolume    MountType = "volume" // MountTypeVolume is the type for remote storage volumes
-	MountTypeTmpfs     MountType = "tmpfs"  // MountTypeTmpfs is the type for mounting tmpfs
-	MountTypeNamedPipe MountType = "npipe"  // MountTypeNamedPipe is the type for mounting Windows named pipes
-)
-
-// MountPropagation represents the propagation of a mount
-type MountPropagation string
-
-const (
-	PropagationRPrivate MountPropagation = "RPRIVATE"
-	PropagationPrivate  MountPropagation = "PRIVATE"
-	PropagationRShared  MountPropagation = "RSHARED"
-	PropagationShared   MountPropagation = "SHARED"
-	PropagationRSlave   MountPropagation = "RSLAVE"
-	PropagationSlave    MountPropagation = "SLAVE"
-)
-
-// MountPoint represents a mount point configuration inside the container.
-// This is used for reporting the mountpoints in use by a container.
-type MountPoint struct {
-	Type        MountType
-	Name        string
-	Source      string
-	Destination string
-	Driver      string
-	Mode        string
-	RW          bool
-	Propagation MountPropagation
-}
-
-type HostConfig struct {
-	NetworkMode string
-}
-
-type Container struct {
-	ID              string
-	Names           []string
-	Image           string
-	ImageID         string
-	Command         string
-	Ports           []Port
-	State           string
-	Status          string
-	HostConfig      HostConfig
-	NetworkSettings *SummaryNetworkSettings
-	Mounts          []MountPoint
-}
-
-func mapPtr[T, R any](elem *T, f func(T) R) *R {
-	if elem == nil {
-		return nil
-	}
-
-	return fun.Ptr(f(*elem))
-}
 
 func main() {
 	if err := (&cli.App{ //nolint:exhaustruct // daaaaa
@@ -141,74 +33,12 @@ func main() {
 								return fmt.Errorf("list containers: %w", err)
 							}
 
-							for _, container := range containers {
-								fmt.Printf("%#v\n", Container{
-									ID:      container.ID,
-									Names:   container.Names,
-									Image:   container.Image,
-									ImageID: container.ImageID,
-									Command: container.Command,
-									Status:  container.Status,
-									Ports: fun.Map(container.Ports, func(port types.Port) Port {
-										return Port{
-											IP: Option[string]{
-												Value: port.IP,
-												Valid: port.IP != "",
-											},
-											PrivatePort: port.PrivatePort,
-											PublicPort: Option[uint16]{
-												Value: port.PublicPort,
-												Valid: port.PublicPort != 0,
-											},
-											Type: port.Type,
-										}
-									}),
-									State: container.State,
-									HostConfig: HostConfig{
-										NetworkMode: container.HostConfig.NetworkMode,
-									},
-									NetworkSettings: &SummaryNetworkSettings{
-										Networks: lo.MapValues(
-											container.NetworkSettings.Networks,
-											func(settings *network.EndpointSettings, _ string) *EndpointSettings {
-												return &EndpointSettings{
-													IPAMConfig: mapPtr(settings.IPAMConfig, func(config network.EndpointIPAMConfig) EndpointIPAMConfig {
-														return EndpointIPAMConfig{
-															IPv4Address:  config.IPv4Address,
-															IPv6Address:  config.IPv6Address,
-															LinkLocalIPs: config.LinkLocalIPs,
-														}
-													}),
-													Links:               settings.Links,
-													Aliases:             settings.Aliases,
-													NetworkID:           settings.NetworkID,
-													EndpointID:          settings.EndpointID,
-													Gateway:             settings.Gateway,
-													IPAddress:           settings.IPAddress,
-													IPPrefixLen:         settings.IPPrefixLen,
-													IPv6Gateway:         settings.IPv6Gateway,
-													GlobalIPv6Address:   settings.GlobalIPv6Address,
-													GlobalIPv6PrefixLen: settings.GlobalIPv6PrefixLen,
-													MacAddress:          settings.MacAddress,
-													DriverOpts:          settings.DriverOpts,
-												}
-											},
-										),
-									},
-									Mounts: fun.Map(container.Mounts, func(point types.MountPoint) MountPoint {
-										return MountPoint{
-											Type:        MountType(point.Type),
-											Name:        point.Name,
-											Source:      point.Source,
-											Destination: point.Destination,
-											Driver:      point.Driver,
-											Mode:        point.Mode,
-											RW:          point.RW,
-											Propagation: MountPropagation(point.Propagation),
-										}
-									}),
-								})
+							c0, err := client.ContainerInspect(ctx.Context, containers[0].ID)
+							if err != nil {
+								return fmt.Errorf("inspect container %s: %w", containers[0].ID, err)
 							}
+
+							spew.Dump(containers, c0)
 
 							return nil
 						},
