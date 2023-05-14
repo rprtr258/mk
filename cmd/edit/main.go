@@ -29,15 +29,15 @@ func (k runner) distance(a, b string, i, j int) int {
 		case i == 0:
 			return j
 		default:
-			replace := k.distance(a, b, i-1, j-1)
+			replaceCost := k.distance(a, b, i-1, j-1)
 			if a[i-1] == b[j-1] {
-				return replace
+				return replaceCost
 			}
 
-			insert := k.distance(a, b, i, j-1) + 1
-			delete := k.distance(a, b, i-1, j) + 1
+			insertCost := k.distance(a, b, i, j-1) + 1
+			deleteCost := k.distance(a, b, i-1, j) + 1
 
-			return fun.Min(replace+1, insert, delete)
+			return fun.Min(replaceCost+1, insertCost, deleteCost)
 		}
 	})
 }
@@ -47,7 +47,7 @@ func getCacheFilename(a, b string) string {
 }
 
 func main() {
-	if err := (&cli.App{
+	if err := (&cli.App{ //nolint:exhaustruct // daaaaa
 		Name:  "edit",
 		Usage: "edit distance runner",
 		Commands: []*cli.Command{
@@ -62,12 +62,12 @@ func main() {
 
 					var merr error
 					for _, file := range files {
-						if err := os.Remove(file); err != nil {
-							if os.IsNotExist(err) {
+						if errRm := os.Remove(file); errRm != nil {
+							if os.IsNotExist(errRm) {
 								continue
 							}
 
-							multierr.AppendInto(&merr, fmt.Errorf("rm cachefile %q: %w", file, err))
+							multierr.AppendInto(&merr, fmt.Errorf("rm cachefile %q: %w", file, errRm))
 						}
 					}
 					return merr
@@ -78,15 +78,14 @@ func main() {
 				Usage:     "Calculate edit distance between two strings",
 				UsageText: "edit dist <first> <second>",
 				Action: func(ctx *cli.Context) error {
-					if ctx.Args().Len() != 2 {
+					if ctx.Args().Len() != 2 { //nolint:gomnd // 2 string: a and b are expected
 						return fmt.Errorf("expected 2 arguments, found %d", ctx.Args().Len())
-
 					}
 
 					args := ctx.Args().Slice()
 					a, b := args[0], args[1]
 
-					return cache.WithCache(
+					return cache.WithCache( //nolint:wrapcheck // daaaaaa
 						getCacheFilename(a, b),
 						func(c cache.Cache[Key, int]) error {
 							distance := runner{c}.distance(a, b, len(a), len(b))

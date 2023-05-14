@@ -58,37 +58,26 @@ type SummaryNetworkSettings struct {
 	Networks map[string]*EndpointSettings
 }
 
-// MountType represents the type of a mount.
+// MountType represents the type of a mount
 type MountType string
 
-// Type constants
 const (
-	// TypeBind is the type for mounting host dir
-	TypeBind MountType = "bind"
-	// TypeVolume is the type for remote storage volumes
-	TypeVolume MountType = "volume"
-	// TypeTmpfs is the type for mounting tmpfs
-	TypeTmpfs MountType = "tmpfs"
-	// TypeNamedPipe is the type for mounting Windows named pipes
-	TypeNamedPipe MountType = "npipe"
+	MountTypeBind      MountType = "bind"   // MountTypeBind is the type for mounting host dir
+	MountTypeVolume    MountType = "volume" // MountTypeVolume is the type for remote storage volumes
+	MountTypeTmpfs     MountType = "tmpfs"  // MountTypeTmpfs is the type for mounting tmpfs
+	MountTypeNamedPipe MountType = "npipe"  // MountTypeNamedPipe is the type for mounting Windows named pipes
 )
 
-// MountPropagation represents the propagation of a mount.
+// MountPropagation represents the propagation of a mount
 type MountPropagation string
 
 const (
-	// PropagationRPrivate RPRIVATE
-	PropagationRPrivate MountPropagation = "rprivate"
-	// PropagationPrivate PRIVATE
-	PropagationPrivate MountPropagation = "private"
-	// PropagationRShared RSHARED
-	PropagationRShared MountPropagation = "rshared"
-	// PropagationShared SHARED
-	PropagationShared MountPropagation = "shared"
-	// PropagationRSlave RSLAVE
-	PropagationRSlave MountPropagation = "rslave"
-	// PropagationSlave SLAVE
-	PropagationSlave MountPropagation = "slave"
+	PropagationRPrivate MountPropagation = "RPRIVATE"
+	PropagationPrivate  MountPropagation = "PRIVATE"
+	PropagationRShared  MountPropagation = "RSHARED"
+	PropagationShared   MountPropagation = "SHARED"
+	PropagationRSlave   MountPropagation = "RSLAVE"
+	PropagationSlave    MountPropagation = "SLAVE"
 )
 
 // MountPoint represents a mount point configuration inside the container.
@@ -114,11 +103,7 @@ type Container struct {
 	Image           string
 	ImageID         string
 	Command         string
-	Created         int64
 	Ports           []Port
-	SizeRw          int64
-	SizeRootFs      int64
-	Labels          map[string]string
 	State           string
 	Status          string
 	HostConfig      HostConfig
@@ -126,7 +111,7 @@ type Container struct {
 	Mounts          []MountPoint
 }
 
-func MapPtr[T, R any](elem *T, f func(T) R) *R {
+func mapPtr[T, R any](elem *T, f func(T) R) *R {
 	if elem == nil {
 		return nil
 	}
@@ -163,7 +148,7 @@ func main() {
 									Image:   container.Image,
 									ImageID: container.ImageID,
 									Command: container.Command,
-									Created: container.Created,
+									Status:  container.Status,
 									Ports: fun.Map(container.Ports, func(port types.Port) Port {
 										return Port{
 											IP: Option[string]{
@@ -178,10 +163,7 @@ func main() {
 											Type: port.Type,
 										}
 									}),
-									SizeRw:     container.SizeRw,
-									SizeRootFs: container.SizeRootFs,
-									Labels:     container.Labels,
-									State:      container.State,
+									State: container.State,
 									HostConfig: HostConfig{
 										NetworkMode: container.HostConfig.NetworkMode,
 									},
@@ -190,7 +172,7 @@ func main() {
 											container.NetworkSettings.Networks,
 											func(settings *network.EndpointSettings, _ string) *EndpointSettings {
 												return &EndpointSettings{
-													IPAMConfig: MapPtr(settings.IPAMConfig, func(config network.EndpointIPAMConfig) EndpointIPAMConfig {
+													IPAMConfig: mapPtr(settings.IPAMConfig, func(config network.EndpointIPAMConfig) EndpointIPAMConfig {
 														return EndpointIPAMConfig{
 															IPv4Address:  config.IPv4Address,
 															IPv6Address:  config.IPv6Address,

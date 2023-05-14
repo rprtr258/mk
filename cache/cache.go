@@ -90,15 +90,15 @@ func Save[K comparable, V any](w io.Writer, cache Cache[K, V]) {
 }
 
 func HashFile(filename string) (string, error) {
-	f, err := os.Open(filename)
+	file, err := os.Open(filename)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
 	}
-	defer f.Close()
+	defer file.Close()
 
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("sha256 hashing: %w", err)
+	if _, errCopy := io.Copy(h, file); errCopy != nil {
+		return "", fmt.Errorf("sha256 hashing: %w", errCopy)
 	}
 
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
