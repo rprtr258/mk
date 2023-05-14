@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/rprtr258/fun"
@@ -54,4 +56,19 @@ func Save[K comparable, V any](filename string, cache Cache[K, V]) {
 	if err := os.WriteFile(filename, b, 0o644); err != nil {
 		log.Warnf("save cache failed", log.F{"err": fmt.Errorf("write file %q: %w", filename, err)})
 	}
+}
+
+func FileHash(filename string) (string, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return "", fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("sha256 hashing: %w", err)
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
