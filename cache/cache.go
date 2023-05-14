@@ -11,6 +11,7 @@ import (
 	"github.com/rprtr258/log"
 )
 
+// TODO: add thread safety
 type Cache[K comparable, V any] map[K]V
 
 // CompareAndSwap value by key k to newV, returns true if value was changed
@@ -80,7 +81,7 @@ func Save[K comparable, V any](w io.Writer, cache Cache[K, V]) {
 	}
 }
 
-func FileHash(filename string) (string, error) {
+func HashFile(filename string) (string, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return "", fmt.Errorf("open file: %w", err)
@@ -94,3 +95,5 @@ func FileHash(filename string) (string, error) {
 
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
+
+// HashDir / HashGlob
