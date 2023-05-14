@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/urfave/cli/v2"
+	"go.uber.org/multierr"
 
 	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
@@ -73,17 +74,17 @@ func main() {
 						return fmt.Errorf("glob: %w", err)
 					}
 
+					var merr error
 					for _, file := range files {
 						if err := os.Remove(file); err != nil {
 							if os.IsNotExist(err) {
-								return nil
+								continue
 							}
 
-							return fmt.Errorf("rm cachefile %q: %w", file, err)
+							multierr.AppendInto(&merr, fmt.Errorf("rm cachefile %q: %w", file, err))
 						}
 					}
-
-					return nil
+					return merr
 				},
 			},
 			{

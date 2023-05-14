@@ -6,6 +6,7 @@ require (
 	github.com/rprtr258/fun v0.0.2
 	github.com/rprtr258/log v0.0.4
 	github.com/urfave/cli/v2 v2.25.3
+	go.uber.org/multierr v1.11.0
 )
 
 require (
