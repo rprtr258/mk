@@ -1,10 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding"
-	"encoding/base64"
-	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,57 +18,46 @@ type Key struct {
 	I, J int
 }
 
-func (k Key) MarshalText() ([]byte, error) {
-	// NOTE: i wanted to just use json here to get humanly readable keys BUT
-	// json.Marshal uses MarshalText method if it is implemented which leads to
-	// infinite recursion
-
-	var b bytes.Buffer
-	if err := gob.NewEncoder(&b).Encode(k); err != nil {
-		return nil, fmt.Errorf("gob encode key %#v: %w", k, err)
-	}
-
-	return []byte(base64.StdEncoding.EncodeToString(b.Bytes())), nil
-}
-
-func (k *Key) UnmarshalText(b []byte) error {
-	if err := gob.NewDecoder(base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(b))).Decode(k); err != nil {
-		return fmt.Errorf("gob decode key: %w", err)
-	}
-
-	return nil
-}
-
-type Cache[K interface {
-	encoding.TextMarshaler
-	comparable
-}, KP interface {
-	*K
-	encoding.TextUnmarshaler
-}, V any] struct {
+type Cache[K comparable, V any] struct {
 	Cache map[K]V
 }
 
-func loadCache(filename string) (Cache[Key, *Key, int], error) {
+type cacheItem[K comparable, V any] struct {
+	K K
+	V V
+}
+
+type cacheItems[K comparable, V any] []cacheItem[K, V]
+
+func loadCache(filename string) (Cache[Key, int], error) {
 	b, err := os.ReadFile(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Cache[Key, *Key, int]{Cache: map[Key]int{}}, nil
+			return Cache[Key, int]{Cache: map[Key]int{}}, nil
 		}
 
-		return Cache[Key, *Key, int]{}, fmt.Errorf("read cache file: %w", err)
+		return Cache[Key, int]{}, fmt.Errorf("read cache file: %w", err)
 	}
 
-	var res Cache[Key, *Key, int]
-	if err := json.Unmarshal(b, &res); err != nil {
-		return Cache[Key, *Key, int]{}, fmt.Errorf("json unmarshal: %w", err)
+	var items cacheItems[Key, int]
+	if err := json.Unmarshal(b, &items); err != nil {
+		return Cache[Key, int]{}, fmt.Errorf("json unmarshal: %w", err)
 	}
 
-	return res, nil
+	return Cache[Key, int]{
+		Cache: fun.ToMap(items, func(elem cacheItem[Key, int]) (Key, int) {
+			return elem.K, elem.V
+		}),
+	}, nil
 }
 
-func saveCache(filename string, cache Cache[Key, *Key, int]) error {
-	b, err := json.Marshal(cache)
+func saveCache(filename string, cache Cache[Key, int]) error {
+	b, err := json.Marshal(fun.ToSlice(cache.Cache, func(k Key, v int) cacheItem[Key, int] {
+		return cacheItem[Key, int]{
+			K: k,
+			V: v,
+		}
+	}))
 	if err != nil {
 		return fmt.Errorf("json marshal: %w", err)
 	}
@@ -80,7 +65,7 @@ func saveCache(filename string, cache Cache[Key, *Key, int]) error {
 	return os.WriteFile(filename, b, 0o644)
 }
 
-func editDistanceHelper(a, b string, i, j int, cache Cache[Key, *Key, int]) int {
+func editDistanceHelper(a, b string, i, j int, cache Cache[Key, int]) int {
 	key := Key{a, b, i, j}
 
 	if res, ok := cache.Cache[key]; ok {
@@ -109,7 +94,7 @@ func editDistanceHelper(a, b string, i, j int, cache Cache[Key, *Key, int]) int 
 	return cache.Cache[key]
 }
 
-func editDistance(a, b string, cache Cache[Key, *Key, int]) int {
+func editDistance(a, b string, cache Cache[Key, int]) int {
 	return editDistanceHelper(a, b, len(a), len(b), cache)
 }
 
@@ -146,10 +131,11 @@ func main() {
 					args := ctx.Args().Slice()
 					a, b := args[0], args[1]
 
+					// TODO: get cache filename as ".%q_%q.editcache.json" % (a, b)
 					cache, err := loadCache(_cacheFilename)
 					if err != nil {
 						log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": err.Error()})
-						cache = Cache[Key, *Key, int]{Cache: map[Key]int{}}
+						cache = Cache[Key, int]{Cache: map[Key]int{}}
 					}
 
 					distance := editDistance(a, b, cache)
