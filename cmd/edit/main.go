@@ -1,117 +1,109 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/rprtr258/log"
-	"github.com/rprtr258/mk"
-	"github.com/samber/lo"
 	"github.com/urfave/cli/v2"
+
+	"github.com/rprtr258/fun"
+	"github.com/rprtr258/log"
 )
 
-type AKey int
+const _cacheFilename = ".cache.json"
 
-func (a AKey) String() string {
-	return fmt.Sprintf("A[%d]", a)
+type Key struct {
+	A, B string
+	I, J int
 }
 
-type BKey int
+func (k Key) MarshalText() ([]byte, error) {
+	// NOTE: i wanted to just use json here to get humanly readable keys BUT
+	// json.Marshal uses MarshalText method if it is implemented which leads to
+	// infinite recursion
 
-func (b BKey) String() string {
-	return fmt.Sprintf("B[%d]", b)
+	var b bytes.Buffer
+	if err := gob.NewEncoder(&b).Encode(k); err != nil {
+		return nil, fmt.Errorf("gob encode key %#v: %w", k, err)
+	}
+
+	return []byte(base64.StdEncoding.EncodeToString(b.Bytes())), nil
 }
 
-type CKey [2]int
+func (k *Key) UnmarshalText(b []byte) error {
+	if err := gob.NewDecoder(base64.NewDecoder(base64.StdEncoding, bytes.NewBuffer(b))).Decode(k); err != nil {
+		return fmt.Errorf("gob decode key: %w", err)
+	}
 
-func (c CKey) String() string {
-	return fmt.Sprintf("C[%d %d]", c[0], c[1])
+	return nil
 }
 
-func newSystem(a, b string) mk.System {
-	system := mk.System{
-		Resources: map[mk.ResourceKey]mk.Resource{},
-		Tasks:     map[string]mk.Task{},
+type Cache struct {
+	Cache map[Key]int
+}
+
+func loadCache(filename string) (Cache, error) {
+	b, err := os.ReadFile(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Cache{Cache: map[Key]int{}}, nil
+		}
+
+		return Cache{}, fmt.Errorf("read cache file: %w", err)
 	}
-	for i, c := range a {
-		system.Resources[AKey(i)] = mk.StringResource(string(c))
+
+	var res Cache
+	if err := json.Unmarshal(b, &res); err != nil {
+		return Cache{}, fmt.Errorf("json unmarshal: %w", err)
 	}
-	for i, c := range b {
-		system.Resources[BKey(i)] = mk.StringResource(string(c))
+
+	return res, nil
+}
+
+func saveCache(filename string, cache Cache) error {
+	b, err := json.Marshal(cache)
+	if err != nil {
+		return fmt.Errorf("json marshal: %w", err)
 	}
-	for i := 0; i < len(a); i++ {
-		i := i
 
-		for j := 0; j < len(b); j++ {
-			j := j
+	return os.WriteFile(filename, b, 0o644)
+}
 
-			var task mk.Task
-			switch {
-			case j == 0:
-				task = mk.Task{
-					Description: mk.Option[string]{},
-					Produces:    []mk.ResourceKey{CKey{i, j}},
-					Action: func(mk.Fetcher) ([]mk.Resource, error) {
-						return []mk.Resource{mk.IntResource(i)}, nil
-					},
-				}
-			case i == 0:
-				task = mk.Task{
-					Description: mk.Option[string]{},
-					Produces:    []mk.ResourceKey{CKey{i, j}},
-					Action: func(mk.Fetcher) ([]mk.Resource, error) {
-						return []mk.Resource{mk.IntResource(j)}, nil
-					},
-				}
-			default:
-				task = mk.Task{
-					Description: mk.Option[string]{},
-					Produces:    []mk.ResourceKey{CKey{i, j}},
-					Action: func(fetch mk.Fetcher) ([]mk.Resource, error) {
-						defer log.Infof("building", log.F{"task": CKey{i, j}})
-						ac, err := fetch.String(AKey(i))
-						if err != nil {
-							return nil, err
-						}
-						bc, err := fetch.String(BKey(j))
-						if err != nil {
-							return nil, err
-						}
-						replace, err := fetch.Int(CKey{i - 1, j - 1})
-						if err != nil {
-							return nil, err
-						}
-						if ac == bc {
-							return []mk.Resource{mk.IntResource(replace)}, nil
-						}
+func editDistanceHelper(a, b string, i, j int, cache Cache) int {
+	key := Key{a, b, i, j}
 
-						insert, err := fetch.Int(CKey{i, j - 1})
-						if err != nil {
-							return nil, err
-						}
-						delete, err := fetch.Int(CKey{i - 1, j})
-						if err != nil {
-							return nil, err
-						}
+	if res, ok := cache.Cache[key]; ok {
+		return res
+	}
 
-						/// x = min(replace, insert, delete) ///
-						x := replace
-						if insert < x {
-							x = insert
-						}
-						if delete < x {
-							x = delete
-						}
+	switch {
+	case j == 0:
+		cache.Cache[key] = i
+	case i == 0:
+		cache.Cache[key] = j
+	default:
+		ac := a[i-1]
+		bc := b[j-1]
+		replace := editDistanceHelper(a, b, i-1, j-1, cache)
+		if ac == bc {
+			cache.Cache[key] = replace
+		} else {
+			insert := editDistanceHelper(a, b, i, j-1, cache) + 1
+			delete := editDistanceHelper(a, b, i-1, j, cache) + 1
 
-						return []mk.Resource{mk.IntResource(1 + x)}, nil
-					},
-				}
-			}
-			system.Tasks[fmt.Sprintf("c%d %d", i, j)] = task
+			cache.Cache[key] = fun.Min(replace+1, insert, delete)
 		}
 	}
-	return system
+
+	return cache.Cache[key]
+}
+
+func editDistance(a, b string, cache Cache) int {
+	return editDistanceHelper(a, b, len(a), len(b), cache)
 }
 
 func main() {
@@ -120,9 +112,24 @@ func main() {
 		Usage: "edit distance runner",
 		Commands: []*cli.Command{
 			{
-				Name: "dist",
-				// Usage: "<first> <second>",
-				Usage: "Calculate edit distance between two strings",
+				Name:  "prune",
+				Usage: "remove cache",
+				Action: func(*cli.Context) error {
+					if err := os.Remove(_cacheFilename); err != nil {
+						if os.IsNotExist(err) {
+							return nil
+						}
+
+						return fmt.Errorf("rm cachefile: %w", err)
+					}
+
+					return nil
+				},
+			},
+			{
+				Name:      "dist",
+				Usage:     "Calculate edit distance between two strings",
+				UsageText: "edit dist <first> <second>",
 				Action: func(ctx *cli.Context) error {
 					if ctx.Args().Len() != 2 {
 						return fmt.Errorf("expected 2 arguments, found %d", ctx.Args().Len())
@@ -131,20 +138,19 @@ func main() {
 
 					args := ctx.Args().Slice()
 					a, b := args[0], args[1]
-					system := newSystem(a, b)
 
-					resources, err := system.Build(fmt.Sprintf("c%d %d", len(a)-1, len(b)-1))
+					cache, err := loadCache(_cacheFilename)
 					if err != nil {
-						return err
+						log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": err.Error()})
+						cache = Cache{Cache: map[Key]int{}}
 					}
 
-					fmt.Println("output resources:", strings.Join(lo.Map(resources, func(v mk.Resource, _ int) string {
-						return fmt.Sprintf("\t%v\n", v)
-					}), " "))
+					distance := editDistance(a, b, cache)
 
-					fmt.Println("all resources:")
-					for k, v := range system.Resources {
-						fmt.Printf("\t%7s: %v\n", k.String(), v)
+					log.Infof("distance found", log.F{"distance": distance})
+
+					if err := saveCache(_cacheFilename, cache); err != nil {
+						return fmt.Errorf("save cache: %w", err)
 					}
 
 					return nil
