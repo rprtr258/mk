@@ -25,6 +25,14 @@ func CompareAndSwap[K, V comparable](cache Cache[K, V], k K, newV V) bool {
 	return false
 }
 
+func (c Cache[K, V]) GetOrEval(key K, eval func() V) V {
+	if _, ok := c[key]; !ok {
+		c[key] = eval()
+	}
+
+	return c[key]
+}
+
 type cacheItem[K comparable, V any] struct {
 	K K
 	V V
@@ -97,3 +105,15 @@ func HashFile(filename string) (string, error) {
 }
 
 // HashDir / HashGlob
+
+func WithCache[K comparable, V any](filename string, f func(Cache[K, V]) error) error {
+	cache := LoadFromFile[K, V](filename)
+
+	if err := f(cache); err != nil {
+		return err
+	}
+
+	SaveToFile(filename, cache)
+
+	return nil
+}

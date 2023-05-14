@@ -17,43 +17,29 @@ type Key struct {
 	I, J int
 }
 
-type kek struct {
+type runner struct {
 	cache cache.Cache[Key, int]
 }
 
-func (k kek) _distance(a, b string, i, j int) int {
-	switch {
-	case j == 0:
-		return i
-	case i == 0:
-		return j
-	default:
-		ac := a[i-1]
-		bc := b[j-1]
-		replace := k.distance(a, b, i-1, j-1)
-		if ac == bc {
-			return replace
+func (k runner) distance(a, b string, i, j int) int {
+	return k.cache.GetOrEval(Key{i, j}, func() int {
+		switch {
+		case j == 0:
+			return i
+		case i == 0:
+			return j
+		default:
+			replace := k.distance(a, b, i-1, j-1)
+			if a[i-1] == b[j-1] {
+				return replace
+			}
+
+			insert := k.distance(a, b, i, j-1) + 1
+			delete := k.distance(a, b, i-1, j) + 1
+
+			return fun.Min(replace+1, insert, delete)
 		}
-
-		insert := k.distance(a, b, i, j-1) + 1
-		delete := k.distance(a, b, i-1, j) + 1
-
-		return fun.Min(replace+1, insert, delete)
-	}
-}
-
-func (k kek) distance(a, b string, i, j int) int {
-	key := Key{i, j}
-
-	if _, ok := k.cache[key]; !ok {
-		k.cache[key] = k._distance(a, b, i, j)
-	}
-
-	return k.cache[key]
-}
-
-func editDistance(a, b string, cache cache.Cache[Key, int]) int {
-	return kek{cache}.distance(a, b, len(a), len(b))
+	})
 }
 
 func getCacheFilename(a, b string) string {
@@ -100,17 +86,16 @@ func main() {
 					args := ctx.Args().Slice()
 					a, b := args[0], args[1]
 
-					cacheFilename := getCacheFilename(a, b)
+					return cache.WithCache(
+						getCacheFilename(a, b),
+						func(c cache.Cache[Key, int]) error {
+							distance := runner{c}.distance(a, b, len(a), len(b))
 
-					_cache := cache.LoadFromFile[Key, int](cacheFilename)
+							log.Infof("distance found", log.F{"distance": distance})
 
-					distance := editDistance(a, b, _cache)
-
-					log.Infof("distance found", log.F{"distance": distance})
-
-					cache.SaveToFile(cacheFilename, _cache)
-
-					return nil
+							return nil
+						},
+					)
 				},
 			},
 		},
