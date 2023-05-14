@@ -13,6 +13,17 @@ import (
 
 type Cache[K comparable, V any] map[K]V
 
+// CompareAndSwap value by key k to newV, returns true if value was changed
+func CompareAndSwap[K, V comparable](cache Cache[K, V], k K, newV V) bool {
+	oldV, ok := cache[k]
+	if !ok || oldV != newV {
+		cache[k] = newV
+		return true
+	}
+
+	return false
+}
+
 type cacheItem[K comparable, V any] struct {
 	K K
 	V V
