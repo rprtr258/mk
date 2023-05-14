@@ -5,9 +5,8 @@ import (
 	"os"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/docker/docker/api/types"
-	dockerClient "github.com/docker/docker/client"
 	"github.com/rprtr258/log"
+	"github.com/rprtr258/mk/contrib/docker"
 	"github.com/urfave/cli/v2"
 )
 
@@ -23,22 +22,17 @@ func main() {
 						Name:  "containers",
 						Usage: "Get info about docker containers",
 						Action: func(ctx *cli.Context) error {
-							client, err := dockerClient.NewClientWithOpts(dockerClient.FromEnv)
+							client, err := docker.NewClient()
 							if err != nil {
-								return fmt.Errorf("docker client: %w", err)
+								return fmt.Errorf("new client: %w", err)
 							}
 
-							containers, err := client.ContainerList(ctx.Context, types.ContainerListOptions{}) //nolint:exhaustruct,lll // no options
+							containers, err := client.Containers(ctx.Context)
 							if err != nil {
-								return fmt.Errorf("list containers: %w", err)
+								return fmt.Errorf("get containers: %w", err)
 							}
 
-							c0, err := client.ContainerInspect(ctx.Context, containers[0].ID)
-							if err != nil {
-								return fmt.Errorf("inspect container %s: %w", containers[0].ID, err)
-							}
-
-							spew.Dump(containers, c0)
+							spew.Dump(containers)
 
 							return nil
 						},

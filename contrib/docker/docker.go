@@ -1,11 +1,28 @@
 package docker
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
+	dockerClient "github.com/docker/docker/client"
+	"github.com/rprtr258/fun"
 )
 
-type ContainerPolicy struct {
+type Client struct {
+	client *dockerClient.Client
+}
+
+func NewClient() (Client, error) {
+	client, err := dockerClient.NewClientWithOpts(dockerClient.FromEnv)
+	if err != nil {
+		return Client{}, fmt.Errorf("new docker client: %w", err)
+	}
+
+	return Client{client}, nil
+}
+
+type ContainerConfig struct {
 	Name     string
 	Hostname string
 	Image    string
@@ -13,28 +30,67 @@ type ContainerPolicy struct {
 		Name string
 	}
 	Volumes       []string
-	RestartPolicy *container.RestartPolicy
+	RestartPolicy string
 }
 
-func compareVolumes(containerVolumes map[string]struct{}, policyVolumes []string) bool {
-	if len(containerVolumes) != len(policyVolumes) {
-		return false
+func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, error) {
+	containers, err := c.client.ContainerList(ctx, types.ContainerListOptions{}) //nolint:exhaustruct // no options
+	if err != nil {
+		return nil, fmt.Errorf("list containers: %w", err)
 	}
 
-	for _, volume := range policyVolumes {
-		if _, ok := containerVolumes[volume]; !ok {
-			return false
+	res := make(map[string]ContainerConfig, len(containers))
+
+	for _, container := range containers {
+		details, errInspect := c.client.ContainerInspect(ctx, container.ID)
+		if errInspect != nil {
+			return nil, fmt.Errorf("inspect container %s: %w", containers[0].ID, errInspect)
+		}
+
+		res[container.ID] = ContainerConfig{
+			Name:          details.Name,
+			Hostname:      details.Config.Hostname,
+			Image:         details.Image, // TODO: image hash
+			Networks:      nil,           // TODO: fill
+			Volumes:       fun.Keys(details.Config.Volumes),
+			RestartPolicy: details.HostConfig.RestartPolicy.Name,
 		}
 	}
 
-	return true
+	return res, nil
 }
 
-func NeedsRecreate(container types.ContainerJSON, policy ContainerPolicy) bool {
+type ContainerPolicy struct {
+	Name     string
+	Hostname fun.Option[string]
+	Image    string
+	Networks []struct {
+		Name string
+	}
+	Volumes       []string
+	RestartPolicy fun.Option[string]
+}
+
+func compareLists[T comparable](xs, ys []T) bool {
+	if len(xs) != len(ys) {
+		return false
+	}
+
+	aSet := fun.ToMap(xs, func(elem T) (T, struct{}) {
+		return elem, struct{}{}
+	})
+
+	return fun.All(ys, func(s T) bool {
+		_, ok := aSet[s]
+		return ok
+	})
+}
+
+func NeedsRecreate(container ContainerConfig, policy ContainerPolicy) bool {
 	return container.Name != policy.Name ||
-		container.Config.Hostname != policy.Hostname ||
+		(policy.Hostname.Valid() && container.Hostname != policy.Hostname.Unwrap()) ||
 		container.Image != policy.Image ||
-		// container.NetworkSettings.Networks != policy.Networks ||
-		!compareVolumes(container.Config.Volumes, policy.Volumes) ||
-		container.HostConfig.RestartPolicy.IsSame(policy.RestartPolicy)
+		!compareLists(container.Networks, policy.Networks) ||
+		!compareLists(container.Volumes, policy.Volumes) ||
+		(policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap())
 }
