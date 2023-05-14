@@ -20,20 +20,25 @@ type cacheItem[K comparable, V any] struct {
 
 type cacheItems[K comparable, V any] []cacheItem[K, V]
 
-func Load[K comparable, V any](filename string) Cache[K, V] {
-	b, err := os.ReadFile(filename)
+func LoadFromFile[K comparable, V any](filename string) Cache[K, V] {
+	file, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[K]V{}
 		}
 
-		log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": fmt.Errorf("read cache file: %w", err).Error()})
+		log.Warnf("can't open cache file", log.F{"filename": filename, "err": err.Error()})
 		return map[K]V{}
 	}
+	defer file.Close()
 
+	return Load[K, V](file)
+}
+
+func Load[K comparable, V any](r io.Reader) Cache[K, V] {
 	var items cacheItems[K, V]
-	if err := json.Unmarshal(b, &items); err != nil {
-		log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": fmt.Errorf("json unmarshal: %w", err).Error()})
+	if err := json.NewDecoder(r).Decode(&items); err != nil {
+		log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": err.Error()})
 		return map[K]V{}
 	}
 
@@ -42,19 +47,25 @@ func Load[K comparable, V any](filename string) Cache[K, V] {
 	})
 }
 
-func Save[K comparable, V any](filename string, cache Cache[K, V]) {
-	b, err := json.Marshal(fun.ToSlice(cache, func(k K, v V) cacheItem[K, V] {
+func SaveToFile[K comparable, V any](filename string, cache Cache[K, V]) {
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		log.Warnf("can't open cache file", log.F{"filename": filename, "err": err.Error()})
+		return
+	}
+	defer file.Close()
+
+	Save(file, cache)
+}
+
+func Save[K comparable, V any](w io.Writer, cache Cache[K, V]) {
+	if err := json.NewEncoder(w).Encode(fun.ToSlice(cache, func(k K, v V) cacheItem[K, V] {
 		return cacheItem[K, V]{
 			K: k,
 			V: v,
 		}
-	}))
-	if err != nil {
-		log.Warnf("save cache failed", log.F{"err": fmt.Errorf("json marshal: %w", err)})
-	}
-
-	if err := os.WriteFile(filename, b, 0o644); err != nil {
-		log.Warnf("save cache failed", log.F{"err": fmt.Errorf("write file %q: %w", filename, err)})
+	})); err != nil {
+		log.Warnf("save cache failed", log.F{"err": err.Error()})
 	}
 }
 

@@ -102,13 +102,13 @@ func main() {
 
 					cacheFilename := getCacheFilename(a, b)
 
-					_cache := cache.Load[Key, int](cacheFilename)
+					_cache := cache.LoadFromFile[Key, int](cacheFilename)
 
 					distance := editDistance(a, b, _cache)
 
 					log.Infof("distance found", log.F{"distance": distance})
 
-					cache.Save(cacheFilename, _cache)
+					cache.SaveToFile(cacheFilename, _cache)
 
 					return nil
 				},
