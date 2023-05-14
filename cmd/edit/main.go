@@ -49,29 +49,29 @@ type Cache[K interface {
 }, KP interface {
 	*K
 	encoding.TextUnmarshaler
-}] struct {
-	Cache map[K]int
+}, V any] struct {
+	Cache map[K]V
 }
 
-func loadCache(filename string) (Cache[Key, *Key], error) {
+func loadCache(filename string) (Cache[Key, *Key, int], error) {
 	b, err := os.ReadFile(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Cache[Key, *Key]{Cache: map[Key]int{}}, nil
+			return Cache[Key, *Key, int]{Cache: map[Key]int{}}, nil
 		}
 
-		return Cache[Key, *Key]{}, fmt.Errorf("read cache file: %w", err)
+		return Cache[Key, *Key, int]{}, fmt.Errorf("read cache file: %w", err)
 	}
 
-	var res Cache[Key, *Key]
+	var res Cache[Key, *Key, int]
 	if err := json.Unmarshal(b, &res); err != nil {
-		return Cache[Key, *Key]{}, fmt.Errorf("json unmarshal: %w", err)
+		return Cache[Key, *Key, int]{}, fmt.Errorf("json unmarshal: %w", err)
 	}
 
 	return res, nil
 }
 
-func saveCache(filename string, cache Cache[Key, *Key]) error {
+func saveCache(filename string, cache Cache[Key, *Key, int]) error {
 	b, err := json.Marshal(cache)
 	if err != nil {
 		return fmt.Errorf("json marshal: %w", err)
@@ -80,7 +80,7 @@ func saveCache(filename string, cache Cache[Key, *Key]) error {
 	return os.WriteFile(filename, b, 0o644)
 }
 
-func editDistanceHelper(a, b string, i, j int, cache Cache[Key, *Key]) int {
+func editDistanceHelper(a, b string, i, j int, cache Cache[Key, *Key, int]) int {
 	key := Key{a, b, i, j}
 
 	if res, ok := cache.Cache[key]; ok {
@@ -109,7 +109,7 @@ func editDistanceHelper(a, b string, i, j int, cache Cache[Key, *Key]) int {
 	return cache.Cache[key]
 }
 
-func editDistance(a, b string, cache Cache[Key, *Key]) int {
+func editDistance(a, b string, cache Cache[Key, *Key, int]) int {
 	return editDistanceHelper(a, b, len(a), len(b), cache)
 }
 
@@ -149,7 +149,7 @@ func main() {
 					cache, err := loadCache(_cacheFilename)
 					if err != nil {
 						log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": err.Error()})
-						cache = Cache[Key, *Key]{Cache: map[Key]int{}}
+						cache = Cache[Key, *Key, int]{Cache: map[Key]int{}}
 					}
 
 					distance := editDistance(a, b, cache)
