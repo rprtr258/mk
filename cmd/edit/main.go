@@ -16,37 +16,43 @@ type Key struct {
 	I, J int
 }
 
-func editDistanceHelper(a, b string, i, j int, cache cache.Cache[Key, int]) int {
-	key := Key{i, j}
+type kek struct {
+	cache cache.Cache[Key, int]
+}
 
-	if res, ok := cache[key]; ok {
-		return res
-	}
-
+func (k kek) _distance(a, b string, i, j int) int {
 	switch {
 	case j == 0:
-		cache[key] = i
+		return i
 	case i == 0:
-		cache[key] = j
+		return j
 	default:
 		ac := a[i-1]
 		bc := b[j-1]
-		replace := editDistanceHelper(a, b, i-1, j-1, cache)
+		replace := k.distance(a, b, i-1, j-1)
 		if ac == bc {
-			cache[key] = replace
-		} else {
-			insert := editDistanceHelper(a, b, i, j-1, cache) + 1
-			delete := editDistanceHelper(a, b, i-1, j, cache) + 1
-
-			cache[key] = fun.Min(replace+1, insert, delete)
+			return replace
 		}
+
+		insert := k.distance(a, b, i, j-1) + 1
+		delete := k.distance(a, b, i-1, j) + 1
+
+		return fun.Min(replace+1, insert, delete)
+	}
+}
+
+func (k kek) distance(a, b string, i, j int) int {
+	key := Key{i, j}
+
+	if _, ok := k.cache[key]; !ok {
+		k.cache[key] = k._distance(a, b, i, j)
 	}
 
-	return cache[key]
+	return k.cache[key]
 }
 
 func editDistance(a, b string, cache cache.Cache[Key, int]) int {
-	return editDistanceHelper(a, b, len(a), len(b), cache)
+	return kek{cache}.distance(a, b, len(a), len(b))
 }
 
 func getCacheFilename(a, b string) string {
