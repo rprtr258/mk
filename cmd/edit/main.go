@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/urfave/cli/v2"
 
@@ -11,10 +12,7 @@ import (
 	"github.com/rprtr258/log"
 )
 
-const _cacheFilename = ".cache.json"
-
 type Key struct {
-	A, B string
 	I, J int
 }
 
@@ -66,7 +64,7 @@ func saveCache(filename string, cache Cache[Key, int]) error {
 }
 
 func editDistanceHelper(a, b string, i, j int, cache Cache[Key, int]) int {
-	key := Key{a, b, i, j}
+	key := Key{i, j}
 
 	if res, ok := cache.Cache[key]; ok {
 		return res
@@ -98,6 +96,10 @@ func editDistance(a, b string, cache Cache[Key, int]) int {
 	return editDistanceHelper(a, b, len(a), len(b), cache)
 }
 
+func getCacheFilename(a, b string) string {
+	return fmt.Sprintf(".%q_%q.editcache.json", a, b)
+}
+
 func main() {
 	if err := (&cli.App{
 		Name:  "edit",
@@ -107,12 +109,19 @@ func main() {
 				Name:  "prune",
 				Usage: "remove cache",
 				Action: func(*cli.Context) error {
-					if err := os.Remove(_cacheFilename); err != nil {
-						if os.IsNotExist(err) {
-							return nil
-						}
+					files, err := filepath.Glob(".*_*.editcache.json")
+					if err != nil {
+						return fmt.Errorf("glob: %w", err)
+					}
 
-						return fmt.Errorf("rm cachefile: %w", err)
+					for _, file := range files {
+						if err := os.Remove(file); err != nil {
+							if os.IsNotExist(err) {
+								return nil
+							}
+
+							return fmt.Errorf("rm cachefile %q: %w", file, err)
+						}
 					}
 
 					return nil
@@ -131,8 +140,9 @@ func main() {
 					args := ctx.Args().Slice()
 					a, b := args[0], args[1]
 
-					// TODO: get cache filename as ".%q_%q.editcache.json" % (a, b)
-					cache, err := loadCache(_cacheFilename)
+					cacheFilename := getCacheFilename(a, b)
+
+					cache, err := loadCache(cacheFilename)
 					if err != nil {
 						log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": err.Error()})
 						cache = Cache[Key, int]{Cache: map[Key]int{}}
@@ -142,7 +152,7 @@ func main() {
 
 					log.Infof("distance found", log.F{"distance": distance})
 
-					if err := saveCache(_cacheFilename, cache); err != nil {
+					if err := saveCache(cacheFilename, cache); err != nil {
 						return fmt.Errorf("save cache: %w", err)
 					}
 
