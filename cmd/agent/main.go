@@ -139,7 +139,19 @@ func main() {
 						return fmt.Errorf("build agent: %w", errBuild)
 					}
 
-					// TODO: strip, minify binary
+					agentBinaryPath := filepath.Join(cwd, "agent")
+
+					if _, _, errBuild := mk.ExecContext(ctx.Context,
+						"strip", agentBinaryPath,
+					); errBuild != nil {
+						return fmt.Errorf("strip agent binary: %w", errBuild)
+					}
+
+					if _, _, errBuild := mk.ExecContext(ctx.Context,
+						"upx", agentBinaryPath,
+					); errBuild != nil {
+						return fmt.Errorf("upx agent binary: %w", errBuild)
+					}
 
 					privateKey, errKey := os.ReadFile("/home/rprtr258/.ssh/rus_rprtr258")
 					if errKey != nil {
