@@ -9,6 +9,7 @@ require (
 	github.com/rprtr258/log v0.0.4
 	github.com/urfave/cli/v2 v2.25.3
 	go.uber.org/multierr v1.11.0
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 )
 
 require (
