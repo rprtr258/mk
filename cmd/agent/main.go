@@ -54,7 +54,6 @@ func NewSSHConnection(user, host string, privateKey []byte) (SSHConnection, erro
 	if err != nil {
 		return SSHConnection{}, fmt.Errorf("new sftp client: %w", err)
 	}
-	defer sftp.Close()
 
 	return SSHConnection{
 		client: client,
@@ -97,13 +96,22 @@ func (conn SSHConnection) Run(cmd string) ( //nolint:nonamedreturns // too many 
 	return outB.Bytes(), errB.Bytes(), errCmd
 }
 
-func (conn SSHConnection) Upload(r io.Reader, remotePath string) error {
+func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMode) error {
 	dstFile, err := conn.sftp.Create(remotePath)
 	if err != nil {
 		return fmt.Errorf("create remote file %q: %w", remotePath, err)
 	}
 	defer dstFile.Close()
 
+	if errChmod := dstFile.Chmod(mode); errChmod != nil {
+		return fmt.Errorf("chmod path=%q mode=%v: %w", remotePath, mode, errChmod)
+	}
+
+	log.Debugf("uploading file", log.F{
+		"user":       conn.user,
+		"host":       conn.host,
+		"remotePath": remotePath,
+	})
 	if _, errUpload := dstFile.ReadFrom(r); errUpload != nil {
 		return fmt.Errorf("write to remote file %q: %w", remotePath, errUpload)
 	}
@@ -131,27 +139,38 @@ func main() {
 						return fmt.Errorf("build agent: %w", errBuild)
 					}
 
+					// TODO: strip, minify binary
+
 					privateKey, errKey := os.ReadFile("/home/rprtr258/.ssh/rus_rprtr258")
 					if errKey != nil {
 						return fmt.Errorf("read private key: %w", errKey)
 					}
 
-					conn, err := NewSSHConnection("rprtr258", "rus", privateKey)
-					if err != nil {
-						return err
+					conn, errSSH := NewSSHConnection("rprtr258", "rus", privateKey)
+					if errSSH != nil {
+						return errSSH
 					}
 					defer conn.Close()
 
-					stdout, stderr, errRun := conn.Run("hostname && ls -la")
+					agentFile, errOpen := os.Open(filepath.Join(cwd, "agent"))
+					if errOpen != nil {
+						return fmt.Errorf("open agent binary: %w", errOpen)
+					}
+					defer agentFile.Close()
+
+					if errUpload := conn.Upload(agentFile, "agent", 0o700); errUpload != nil {
+						return fmt.Errorf("upload agent binary: %w", errUpload)
+					}
+
+					stdout, stderr, errRun := conn.Run("./agent docker containers")
+					log.Info(string(stdout))
+					if len(stderr) != 0 {
+						log.Info("stderr:")
+						log.Info(string(stderr))
+					}
 					if errRun != nil {
 						return errRun
 					}
-
-					log.Info("stdout:")
-					log.Info(string(stdout))
-
-					log.Info("stderr:")
-					log.Info(string(stderr))
 
 					return nil
 				},
