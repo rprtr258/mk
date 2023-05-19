@@ -24,9 +24,12 @@ const _version = "v0.0.0"
 type SSHConnection struct {
 	client *ssh.Client
 	sftp   *sftp.Client
+
+	user string
+	host string
 }
 
-func NewSSHConnection(user, addr string, privateKey []byte) (SSHConnection, error) {
+func NewSSHConnection(user, host string, privateKey []byte) (SSHConnection, error) {
 	key, err := ssh.ParsePrivateKey(privateKey)
 	if err != nil {
 		return SSHConnection{}, fmt.Errorf("parse private key: %w", err)
@@ -34,7 +37,7 @@ func NewSSHConnection(user, addr string, privateKey []byte) (SSHConnection, erro
 
 	client, err := ssh.Dial(
 		"tcp",
-		net.JoinHostPort(addr, "22"),
+		net.JoinHostPort(host, "22"),
 		&ssh.ClientConfig{ //nolint:exhaustruct // daaaaaa
 			User:            user,
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // host key ignored
@@ -44,7 +47,7 @@ func NewSSHConnection(user, addr string, privateKey []byte) (SSHConnection, erro
 		},
 	)
 	if err != nil {
-		return SSHConnection{}, fmt.Errorf("connect to ssh server user=%q host=%q: %w", user, addr, err)
+		return SSHConnection{}, fmt.Errorf("connect to ssh server user=%q host=%q: %w", user, host, err)
 	}
 
 	sftp, err := sftp.NewClient(client)
@@ -56,6 +59,8 @@ func NewSSHConnection(user, addr string, privateKey []byte) (SSHConnection, erro
 	return SSHConnection{
 		client: client,
 		sftp:   sftp,
+		user:   user,
+		host:   host,
 	}, nil
 }
 
@@ -70,17 +75,26 @@ func (conn SSHConnection) Close() error {
 	return merr
 }
 
-func (conn SSHConnection) Run(cmd string) (string, error) {
+func (conn SSHConnection) Run(cmd string) ( //nolint:nonamedreturns // too many returns
+	stdout, stderr []byte,
+	err error,
+) {
 	session, err := conn.client.NewSession()
 	if err != nil {
-		return "", fmt.Errorf("new session: %w", err)
+		return nil, nil, fmt.Errorf("new session: %w", err)
 	}
 	defer session.Close()
 
-	var b bytes.Buffer
-	session.Stdout = &b
+	var outB, errB bytes.Buffer
+	session.Stdout = &outB
+	session.Stderr = &errB
+	log.Debugf("executing command remotely", log.F{
+		"user":    conn.user,
+		"host":    conn.host,
+		"command": cmd,
+	})
 	errCmd := session.Run(cmd)
-	return b.String(), errCmd
+	return outB.Bytes(), errB.Bytes(), errCmd
 }
 
 func (conn SSHConnection) Upload(r io.Reader, remotePath string) error {
@@ -128,12 +142,16 @@ func main() {
 					}
 					defer conn.Close()
 
-					output, errRun := conn.Run("hostname && ls -la")
+					stdout, stderr, errRun := conn.Run("hostname && ls -la")
 					if errRun != nil {
 						return errRun
 					}
 
-					log.Info(output)
+					log.Info("stdout:")
+					log.Info(string(stdout))
+
+					log.Info("stderr:")
+					log.Info(string(stderr))
 
 					return nil
 				},
