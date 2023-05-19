@@ -24,12 +24,12 @@ type sentinelAction[T any] struct {
 }
 
 func (a sentinelAction[T]) IsCompleted() (bool, error) {
-	return a.action.IsCompleted()
+	return a.action.IsCompleted() //nolint:wrapcheck // return original error
 }
 
 func (a sentinelAction[T]) Perform() (Sentinel, error) {
 	_, err := a.action.Perform()
-	return Sentinel{}, err
+	return Sentinel{}, err //nolint:wrapcheck // return original error
 }
 
 func RemoveResult[T any](action Action[T]) Action[Sentinel] {

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/rprtr258/log"
 	"github.com/urfave/cli/v2"
+	"go.uber.org/multierr"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/rprtr258/mk"
@@ -19,10 +21,15 @@ import (
 
 const _version = "v0.0.0"
 
-func remoteRun(user, addr string, privateKey []byte, cmd string) (string, error) {
+type SSHConnection struct {
+	client *ssh.Client
+	sftp   *sftp.Client
+}
+
+func NewSSHConnection(user, addr string, privateKey []byte) (SSHConnection, error) {
 	key, err := ssh.ParsePrivateKey(privateKey)
 	if err != nil {
-		return "", fmt.Errorf("parse private key: %w", err)
+		return SSHConnection{}, fmt.Errorf("parse private key: %w", err)
 	}
 
 	client, err := ssh.Dial(
@@ -37,10 +44,34 @@ func remoteRun(user, addr string, privateKey []byte, cmd string) (string, error)
 		},
 	)
 	if err != nil {
-		return "", fmt.Errorf("connect to ssh server user=%q host=%q: %w", user, addr, err)
+		return SSHConnection{}, fmt.Errorf("connect to ssh server user=%q host=%q: %w", user, addr, err)
 	}
 
-	session, err := client.NewSession()
+	sftp, err := sftp.NewClient(client)
+	if err != nil {
+		return SSHConnection{}, fmt.Errorf("new sftp client: %w", err)
+	}
+	defer sftp.Close()
+
+	return SSHConnection{
+		client: client,
+		sftp:   sftp,
+	}, nil
+}
+
+func (conn SSHConnection) Close() error {
+	var merr error
+	if errSFTP := conn.sftp.Close(); errSFTP != nil {
+		multierr.AppendInto(&merr, fmt.Errorf("close sftp client: %w", errSFTP))
+	}
+	if errSSH := conn.client.Close(); errSSH != nil {
+		multierr.AppendInto(&merr, fmt.Errorf("close ssh client: %w", errSSH))
+	}
+	return merr
+}
+
+func (conn SSHConnection) Run(cmd string) (string, error) {
+	session, err := conn.client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("new session: %w", err)
 	}
@@ -52,43 +83,17 @@ func remoteRun(user, addr string, privateKey []byte, cmd string) (string, error)
 	return b.String(), errCmd
 }
 
-func SSHCopyFile(srcPath, dstPath string) error {
-	config := &ssh.ClientConfig{
-		User: "user",
-		Auth: []ssh.AuthMethod{
-			ssh.Password("pass"),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	client, _ := ssh.Dial("tcp", "remotehost:22", config)
-	defer client.Close()
-
-	// open an SFTP session over an existing ssh connection.
-	sftp, err := sftp.NewClient(client)
+func (conn SSHConnection) Upload(r io.Reader, remotePath string) error {
+	dstFile, err := conn.sftp.Create(remotePath)
 	if err != nil {
-		return err
-	}
-	defer sftp.Close()
-
-	// Open the source file
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	// Create the destination file
-	dstFile, err := sftp.Create(dstPath)
-	if err != nil {
-		return err
+		return fmt.Errorf("create remote file %q: %w", remotePath, err)
 	}
 	defer dstFile.Close()
 
-	// write to file
-	if _, err := dstFile.ReadFrom(srcFile); err != nil {
-		return err
+	if _, errUpload := dstFile.ReadFrom(r); errUpload != nil {
+		return fmt.Errorf("write to remote file %q: %w", remotePath, errUpload)
 	}
+
 	return nil
 }
 
@@ -117,7 +122,13 @@ func main() {
 						return fmt.Errorf("read private key: %w", errKey)
 					}
 
-					output, errRun := remoteRun("rprtr258", "rus", privateKey, "hostname && ls -la")
+					conn, err := NewSSHConnection("rprtr258", "rus", privateKey)
+					if err != nil {
+						return err
+					}
+					defer conn.Close()
+
+					output, errRun := conn.Run("hostname && ls -la")
 					if errRun != nil {
 						return errRun
 					}
