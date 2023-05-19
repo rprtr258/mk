@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/rprtr258/log"
+	"github.com/rprtr258/mk"
 	"github.com/rprtr258/mk/contrib/docker"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/crypto/ssh"
@@ -15,28 +17,30 @@ import (
 
 const _version = "v0.0.0"
 
-func remoteRun(user, addr, privateKey, cmd string) (string, error) {
-	// read privateKey
-	key, err := ssh.ParsePrivateKey([]byte(privateKey))
+func remoteRun(user, addr string, privateKey []byte, cmd string) (string, error) {
+	key, err := ssh.ParsePrivateKey(privateKey)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse private key: %w", err)
 	}
 
-	config := &ssh.ClientConfig{
-		User:            user,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(key),
+	client, err := ssh.Dial(
+		"tcp",
+		net.JoinHostPort(addr, "22"),
+		&ssh.ClientConfig{ //nolint:exhaustruct // daaaaaa
+			User:            user,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // host key ignored
+			Auth: []ssh.AuthMethod{
+				ssh.PublicKeys(key),
+			},
 		},
-	}
-	client, err := ssh.Dial("tcp", net.JoinHostPort(addr, "22"), config)
+	)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("connect to ssh server user=%q host=%q: %w", user, addr, err)
 	}
 
 	session, err := client.NewSession()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("new session: %w", err)
 	}
 	defer session.Close()
 
@@ -54,18 +58,29 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name: "test",
-				Action: func(*cli.Context) error {
-					privateKey, err := os.ReadFile("/home/rprtr258/.ssh/rus_rprtr258")
-					if err != nil {
-						return err
+				Action: func(ctx *cli.Context) error {
+					cwd, errCwd := os.Getwd()
+					if errCwd != nil {
+						return fmt.Errorf("get cwd: %w", errCwd)
 					}
 
-					a, err := remoteRun("rprtr258", "rus", string(privateKey), "hostname && ls -la")
-					if err != nil {
-						return err
+					if _, _, errBuild := mk.ExecContext(ctx.Context,
+						"go", "build", filepath.Join(cwd, "cmd/agent"),
+					); errBuild != nil {
+						return fmt.Errorf("build agent: %w", errBuild)
 					}
 
-					log.Info(a)
+					privateKey, errKey := os.ReadFile("/home/rprtr258/.ssh/rus_rprtr258")
+					if errKey != nil {
+						return fmt.Errorf("read private key: %w", errKey)
+					}
+
+					output, errRun := remoteRun("rprtr258", "rus", privateKey, "hostname && ls -la")
+					if errRun != nil {
+						return errRun
+					}
+
+					log.Info(output)
 
 					return nil
 				},
