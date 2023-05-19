@@ -53,6 +53,24 @@ func main() {
 		HideHelp:        true,
 		Commands: []*cli.Command{
 			{
+				Name: "test",
+				Action: func(*cli.Context) error {
+					privateKey, err := os.ReadFile("/home/rprtr258/.ssh/rus_rprtr258")
+					if err != nil {
+						return err
+					}
+
+					a, err := remoteRun("rprtr258", "rus", string(privateKey), "hostname && ls -la")
+					if err != nil {
+						return err
+					}
+
+					log.Info(a)
+
+					return nil
+				},
+			},
+			{
 				Name:  "version",
 				Usage: "Show mk agent version",
 				Action: func(*cli.Context) error {
