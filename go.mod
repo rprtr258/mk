@@ -5,11 +5,12 @@ go 1.19
 require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/docker v20.10.24+incompatible
+	github.com/pkg/sftp v1.13.5
 	github.com/rprtr258/fun v0.0.2
 	github.com/rprtr258/log v0.0.4
 	github.com/urfave/cli/v2 v2.25.3
 	go.uber.org/multierr v1.11.0
-	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	golang.org/x/crypto v0.0.0-20211215153901-e495a2d5b3d3
 )
 
 require (
@@ -20,6 +21,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/moby/term v0.5.0 // indirect

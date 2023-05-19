@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pkg/sftp"
 	"github.com/rprtr258/log"
-	"github.com/rprtr258/mk"
-	"github.com/rprtr258/mk/contrib/docker"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/rprtr258/mk"
+	"github.com/rprtr258/mk/contrib/docker"
 )
 
 const _version = "v0.0.0"
@@ -48,6 +50,46 @@ func remoteRun(user, addr string, privateKey []byte, cmd string) (string, error)
 	session.Stdout = &b
 	errCmd := session.Run(cmd)
 	return b.String(), errCmd
+}
+
+func SSHCopyFile(srcPath, dstPath string) error {
+	config := &ssh.ClientConfig{
+		User: "user",
+		Auth: []ssh.AuthMethod{
+			ssh.Password("pass"),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	client, _ := ssh.Dial("tcp", "remotehost:22", config)
+	defer client.Close()
+
+	// open an SFTP session over an existing ssh connection.
+	sftp, err := sftp.NewClient(client)
+	if err != nil {
+		return err
+	}
+	defer sftp.Close()
+
+	// Open the source file
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Create the destination file
+	dstFile, err := sftp.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	// write to file
+	if _, err := dstFile.ReadFrom(srcFile); err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {
