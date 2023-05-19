@@ -30,7 +30,7 @@ type MkdirOptions struct {
 	Perm fs.FileMode
 }
 
-func NewMkdir(opts MkdirOptions) Action {
+func NewMkdir(opts MkdirOptions) Action[Sentinel] {
 	perm := fun.If(opts.Perm != 0, opts.Perm, DefaultDirPerm)
 
 	return &mkdir{
@@ -78,25 +78,25 @@ func (a *mkdir) IsCompleted() (bool, error) {
 		nil
 }
 
-func (a *mkdir) Perform() error {
+func (a *mkdir) Perform() (Sentinel, error) {
 	if err := a.inspect(); err != nil {
-		return err
+		return Sentinel{}, err
 	}
 
 	if !a.inspection.exists {
 		if err := os.MkdirAll(a.dirname, a.perm); err != nil {
-			return fmt.Errorf("mkdir dirname=%q mode=%v: %w", a.dirname, a.perm, err)
+			return Sentinel{}, fmt.Errorf("mkdir dirname=%q mode=%v: %w", a.dirname, a.perm, err)
 		}
-		return nil
+		return Sentinel{}, nil
 	}
 
 	if !a.inspection.isDir {
-		return fmt.Errorf("%q is a file, not directory", a.dirname)
+		return Sentinel{}, fmt.Errorf("%q is a file, not directory", a.dirname)
 	}
 
 	if err := os.Chmod(a.dirname, a.perm); err != nil {
-		return fmt.Errorf("chmod dirname=%q mode=%v: %w", a.dirname, a.perm, err)
+		return Sentinel{}, fmt.Errorf("chmod dirname=%q mode=%v: %w", a.dirname, a.perm, err)
 	}
 
-	return nil
+	return Sentinel{}, nil
 }

@@ -7,17 +7,37 @@ import (
 	"go.uber.org/multierr"
 )
 
+// Sentinel result for actions that have nothing to return.
+type Sentinel struct{}
+
 // Action represents action that can be retried several times.
 // If action was alreadey completed, there is no need to run it again.
-type Action interface {
+type Action[T any] interface {
 	// IsCompleted - check whether action need to be run.
 	IsCompleted() (bool, error)
-	// Perform action. After success, IsCompleted must return true.
-	Perform() error
+	// Perform action and return some result. After success, IsCompleted must return true.
+	Perform() (T, error)
+}
+
+type sentinelAction[T any] struct {
+	action Action[T]
+}
+
+func (a sentinelAction[T]) IsCompleted() (bool, error) {
+	return a.action.IsCompleted()
+}
+
+func (a sentinelAction[T]) Perform() (Sentinel, error) {
+	_, err := a.action.Perform()
+	return Sentinel{}, err
+}
+
+func RemoveResult[T any](action Action[T]) Action[Sentinel] {
+	return sentinelAction[T]{action: action}
 }
 
 // Perform single action. If it is already completed, no action is performed.
-func Perform(action Action) error {
+func Perform(action Action[Sentinel]) error {
 	completed, errCompleted := action.IsCompleted()
 	if errCompleted != nil {
 		return fmt.Errorf("check isCompleted: %w", errCompleted)
@@ -27,11 +47,12 @@ func Perform(action Action) error {
 		return nil
 	}
 
-	return action.Perform() //nolint:wrapcheck // return original error
+	_, err := action.Perform()
+	return err //nolint:wrapcheck // return original error
 }
 
 // Multistep - perform idempotent actions by given order.
-func Multistep(actions ...Action) error {
+func Multistep(actions ...Action[Sentinel]) error {
 	for i, action := range actions {
 		if err := Perform(action); err != nil {
 			return fmt.Errorf("action #%d: %w", i, err)
@@ -41,7 +62,7 @@ func Multistep(actions ...Action) error {
 	return nil
 }
 
-func Parallel(actions ...Action) error {
+func Parallel(actions ...Action[Sentinel]) error {
 	errch := make(chan error)
 	errs := []error{}
 
