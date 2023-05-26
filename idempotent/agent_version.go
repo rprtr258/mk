@@ -5,22 +5,16 @@ import (
 )
 
 type agentVersion struct {
-	User       string
-	Host       string
-	PrivateKey []byte
+	conn SSHConnection
 }
 
 type AgentVersionOptions struct {
-	User       string
-	Host       string
-	PrivateKey []byte
+	Conn SSHConnection
 }
 
 func NewAgentVersion(opts AgentVersionOptions) Action[string] {
 	return &agentVersion{
-		User:       opts.User,
-		Host:       opts.Host,
-		PrivateKey: opts.PrivateKey,
+		conn: opts.Conn,
 	}
 }
 
@@ -29,5 +23,5 @@ func (a *agentVersion) IsCompleted() (bool, error) {
 }
 
 func (a *agentVersion) Perform(ctx context.Context) (string, error) {
-	return agentCall[string](ctx, a.User, a.Host, a.PrivateKey, []string{"version"})
+	return agentCall[string](ctx, a.conn, []string{"version"})
 }

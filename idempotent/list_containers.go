@@ -7,22 +7,16 @@ import (
 )
 
 type listContainers struct {
-	User       string
-	Host       string
-	PrivateKey []byte
+	conn SSHConnection
 }
 
 type ListContainersOptions struct {
-	User       string
-	Host       string
-	PrivateKey []byte
+	Conn SSHConnection
 }
 
 func NewListContainers(opts ListContainersOptions) Action[map[string]docker.ContainerConfig] {
 	return &listContainers{
-		User:       opts.User,
-		Host:       opts.Host,
-		PrivateKey: opts.PrivateKey,
+		conn: opts.Conn,
 	}
 }
 
@@ -33,7 +27,7 @@ func (a *listContainers) IsCompleted() (bool, error) {
 func (a *listContainers) Perform(ctx context.Context) (map[string]docker.ContainerConfig, error) {
 	return agentCall[map[string]docker.ContainerConfig](
 		ctx,
-		a.User, a.Host, a.PrivateKey,
+		a.conn,
 		[]string{"docker", "containers"},
 	)
 }

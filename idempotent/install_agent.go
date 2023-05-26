@@ -123,44 +123,39 @@ func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMod
 	return nil
 }
 
-func checkAgentInstalled(_ context.Context, user, host string, privateKey []byte) (bool, error) {
+func checkAgentInstalled(ctx context.Context, conn SSHConnection) (bool, error) {
 	l := log.With(log.F{
-		"user": user,
-		"host": host,
+		"user": conn.user,
+		"host": conn.host,
 	}).Tag("checkAgentInstalled")
 
 	// TODO: cache checks
 
-	conn, errSSH := NewSSHConnection(user, host, privateKey)
-	if errSSH != nil {
-		return false, fmt.Errorf("new ssh connection: %w", errSSH)
-	}
-	defer conn.Close()
-
 	stdout, stderr, errAgentVersion := conn.Run("./mk-agent version")
 	if errAgentVersion != nil {
 		if strings.Contains(string(stderr), "./mk-agent: No such file or directory") {
-			l.Infof("mk-agent is not installed remotely", log.F{"version": string(stdout)})
+			l.Info("mk-agent is not installed remotely")
 
 			return false, nil
 		}
 
-		return false, fmt.Errorf(
-			"get remote mk-agent version, stderr=%q: %w",
-			stderr,
-			errAgentVersion,
-		)
+		return false, fmt.Errorf("get actual mk-agent version: %w", errAgentVersion)
 	}
 
-	l.Infof("got remote mk-agent version", log.F{"version": string(stdout)})
+	var version string
+	if errUnmarshal := json.Unmarshal(stdout, &version); errUnmarshal != nil {
+		return false, fmt.Errorf("json unmarshal mk-agent version: %w", errUnmarshal)
+	}
+
+	l.Infof("got remote mk-agent version", log.F{"version": version})
 
 	// TODO: only in dev
-	// return string(stdout) == _agentVersion, nil
+	// return version == _agentVersion, nil
 	return false, nil
 }
 
-func installAgent(ctx context.Context, user, host string, privateKey []byte) error {
-	isInstalled, err := checkAgentInstalled(ctx, user, host, privateKey)
+func installAgent(ctx context.Context, conn SSHConnection) error {
+	isInstalled, err := checkAgentInstalled(ctx, conn)
 	if err != nil {
 		return err
 	}
@@ -194,13 +189,6 @@ func installAgent(ctx context.Context, user, host string, privateKey []byte) err
 		return fmt.Errorf("upx agent binary: %w", errBuild)
 	}
 
-	// TODO: reuse ssh conn
-	conn, errSSH := NewSSHConnection(user, host, privateKey)
-	if errSSH != nil {
-		return errSSH
-	}
-	defer conn.Close()
-
 	agentFile, errOpen := os.Open(filepath.Join(cwd, _agentExecutable))
 	if errOpen != nil {
 		return fmt.Errorf("open agent binary: %w", errOpen)
@@ -232,19 +220,12 @@ func installAgent(ctx context.Context, user, host string, privateKey []byte) err
 
 func agentCall[T any](
 	ctx context.Context,
-	user, host string, privateKey []byte,
+	conn SSHConnection,
 	cmd []string,
 ) (T, error) {
-	if errInstall := installAgent(ctx, user, host, privateKey); errInstall != nil {
+	if errInstall := installAgent(ctx, conn); errInstall != nil {
 		return fun.Zero[T](), errInstall
 	}
-
-	// TODO: reuse ssh conn
-	conn, errSSH := NewSSHConnection(user, host, privateKey)
-	if errSSH != nil {
-		return fun.Zero[T](), errSSH
-	}
-	defer conn.Close()
 
 	stdout, stderr, errRun := conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
 	if errRun != nil {
