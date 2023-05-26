@@ -22,6 +22,18 @@ func NewClient() (Client, error) {
 	return Client{client}, nil
 }
 
+type ContainerState int
+
+const (
+	ContainerStateCreated ContainerState = iota
+	ContainerStateRunning
+	ContainerStatePaused
+	ContainerStateRestarting
+	ContainerStateRemoving
+	ContainerStateExited
+	ContainerStateDead
+)
+
 type ContainerConfig struct {
 	Name     string
 	Hostname string
@@ -31,6 +43,7 @@ type ContainerConfig struct {
 	}
 	Volumes       []string
 	RestartPolicy string
+	State         ContainerState
 }
 
 func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, error) {
@@ -47,6 +60,24 @@ func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, err
 			return nil, fmt.Errorf("inspect container %s: %w", containers[0].ID, errInspect)
 		}
 
+		var state ContainerState
+		switch details.State.Status {
+		case "running":
+			state = ContainerStateRunning
+		case "paused":
+			state = ContainerStatePaused
+		case "restarting":
+			state = ContainerStateRestarting
+		case "removing":
+			state = ContainerStateRemoving
+		case "exited":
+			state = ContainerStateExited
+		case "dead":
+			state = ContainerStateDead
+		default:
+			return nil, fmt.Errorf("unknown container state: %s", details.State.Status)
+		}
+
 		res[container.ID] = ContainerConfig{
 			Name:          details.Name,
 			Hostname:      details.Config.Hostname,
@@ -54,19 +85,20 @@ func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, err
 			Networks:      nil,           // TODO: fill
 			Volumes:       fun.Keys(details.Config.Volumes),
 			RestartPolicy: details.HostConfig.RestartPolicy.Name,
+			State:         state,
 		}
 	}
 
 	return res, nil
 }
 
-type ContainerState int
+type ContainerDesiredState int
 
 const (
-	ContainerStateStarted ContainerState = iota // container must exist and be running
-	ContainerStateAbsent                        // container must be stopped and removed
-	ContainerStatePresent                       // container must exist
-	ContainerStateStopped                       // container must exist and be stopped
+	ContainerDesiredStateStarted ContainerDesiredState = iota // container must exist and be running
+	ContainerDesiredStateAbsent                               // container must be stopped and removed
+	ContainerDesiredStatePresent                              // container must exist
+	ContainerDesiredStateStopped                              // container must exist and be stopped
 )
 
 type ContainerPolicy struct {
@@ -78,7 +110,7 @@ type ContainerPolicy struct {
 	}
 	Volumes       []string
 	RestartPolicy fun.Option[string]
-	State         ContainerState
+	State         ContainerDesiredState
 }
 
 func compareLists[T comparable](xs, ys []T) bool {
@@ -103,4 +135,64 @@ func NeedsRecreate(container ContainerConfig, policy ContainerPolicy) bool {
 		!compareLists(container.Networks, policy.Networks) ||
 		!compareLists(container.Volumes, policy.Volumes) ||
 		(policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap())
+}
+
+func Reconciliate(container ContainerConfig, policy ContainerPolicy) error {
+	if NeedsRecreate(container, policy) {
+		return nil // TODO: recreate
+	}
+
+	switch policy.State {
+	case ContainerDesiredStateStarted:
+		switch container.State {
+		case ContainerStateRunning, ContainerStateRestarting:
+			return nil
+		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
+			return nil // TODO: run
+		case ContainerStateRemoving:
+			return nil // TODO: create, then run
+		case ContainerStateDead:
+			return fmt.Errorf("don't know how to start from dead state")
+		default:
+			return fmt.Errorf("don't know how to start from state %v", container.State)
+		}
+	case ContainerDesiredStateAbsent:
+		switch container.State {
+		case ContainerStateRemoving:
+			return nil
+		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
+			return nil // TODO: remove
+		case ContainerStateRunning, ContainerStateRestarting:
+			return nil // TODO: stop, then remove
+		case ContainerStateDead:
+			return fmt.Errorf("don't know how to remove from dead state")
+		default:
+			return fmt.Errorf("don't know how to remove from state %v", container.State)
+		}
+	case ContainerDesiredStatePresent:
+		switch container.State {
+		case ContainerStateCreated, ContainerStateRunning,
+			ContainerStatePaused, ContainerStateRestarting, ContainerStateExited:
+			return nil
+		case ContainerStateDead:
+			return fmt.Errorf("don't know how to become present from dead state")
+		case ContainerStateRemoving:
+			return nil // TODO: start
+		default:
+			return fmt.Errorf("don't know how to become present from state %v", container.State)
+		}
+	case ContainerDesiredStateStopped:
+		switch container.State {
+		case ContainerStateCreated, ContainerStatePaused, ContainerStateRemoving, ContainerStateExited:
+			return nil
+		case ContainerStateRunning, ContainerStateRestarting:
+			return nil // TODO: stop
+		case ContainerStateDead:
+			return fmt.Errorf("don't know how to stop from dead state")
+		default:
+			return fmt.Errorf("don't know how to stop from state %v", container.State)
+		}
+	default:
+		return fmt.Errorf("unknown container desired state: %v", policy.State)
+	}
 }
