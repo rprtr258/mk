@@ -118,7 +118,10 @@ func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMod
 	return nil
 }
 
-func checkAgentInstalled(ctx context.Context, conn SSHConnection) (bool, error) {
+func checkAgentInstalled(
+	_ context.Context,
+	conn SSHConnection,
+) (bool, error) { //nolint:unparam // TODO: remove nolint when fix version checking
 	l := conn.l.Tag("checkAgentInstalled")
 
 	// TODO: cache checks
@@ -192,19 +195,6 @@ func installAgent(ctx context.Context, conn SSHConnection) error {
 	const agentFilePerms = 0o700
 	if errUpload := conn.Upload(agentFile, remoteAgentBinaryPath, agentFilePerms); errUpload != nil {
 		return fmt.Errorf("upload agent binary: %w", errUpload)
-	}
-
-	stdout, stderr, errRun := conn.Run(strings.Join([]string{
-		remoteAgentBinaryPath,
-		"version",
-	}, " "))
-	log.Info(string(stdout))
-	if len(stderr) != 0 {
-		log.Info("stderr:")
-		log.Info(string(stderr))
-	}
-	if errRun != nil {
-		return errRun
 	}
 
 	return nil
