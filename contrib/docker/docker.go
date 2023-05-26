@@ -60,6 +60,15 @@ func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, err
 	return res, nil
 }
 
+type ContainerState int
+
+const (
+	ContainerStateStarted ContainerState = iota // container must exist and be running
+	ContainerStateAbsent                        // container must be stopped and removed
+	ContainerStatePresent                       // container must exist
+	ContainerStateStopped                       // container must exist and be stopped
+)
+
 type ContainerPolicy struct {
 	Name     string
 	Hostname fun.Option[string]
@@ -69,6 +78,7 @@ type ContainerPolicy struct {
 	}
 	Volumes       []string
 	RestartPolicy fun.Option[string]
+	State         ContainerState
 }
 
 func compareLists[T comparable](xs, ys []T) bool {
