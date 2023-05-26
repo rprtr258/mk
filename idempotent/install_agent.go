@@ -31,6 +31,8 @@ type SSHConnection struct {
 
 	user string
 	host string
+
+	l log.Logger
 }
 
 func NewSSHConnection(user, host string, privateKey []byte) (SSHConnection, error) {
@@ -64,6 +66,7 @@ func NewSSHConnection(user, host string, privateKey []byte) (SSHConnection, erro
 		sftp:   sftp,
 		user:   user,
 		host:   host,
+		l:      log.Tag("ssh").With(log.F{"user": user, "host": host}),
 	}, nil
 }
 
@@ -91,11 +94,7 @@ func (conn SSHConnection) Run(cmd string) ( //nolint:nonamedreturns // too many 
 	var outB, errB bytes.Buffer
 	session.Stdout = &outB
 	session.Stderr = &errB
-	log.Debugf("executing command remotely", log.F{
-		"user":    conn.user,
-		"host":    conn.host,
-		"command": cmd,
-	})
+	conn.l.Debugf("executing command remotely", log.F{"command": cmd})
 	errCmd := session.Run(cmd)
 	return outB.Bytes(), errB.Bytes(), errCmd
 }
@@ -111,11 +110,7 @@ func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMod
 		return fmt.Errorf("chmod path=%q mode=%v: %w", remotePath, mode, errChmod)
 	}
 
-	log.Debugf("uploading file", log.F{
-		"user":       conn.user,
-		"host":       conn.host,
-		"remotePath": remotePath,
-	})
+	conn.l.Debugf("uploading file", log.F{"remotePath": remotePath})
 	if _, errUpload := dstFile.ReadFrom(r); errUpload != nil {
 		return fmt.Errorf("write to remote file %q: %w", remotePath, errUpload)
 	}
@@ -124,10 +119,7 @@ func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMod
 }
 
 func checkAgentInstalled(ctx context.Context, conn SSHConnection) (bool, error) {
-	l := log.With(log.F{
-		"user": conn.user,
-		"host": conn.host,
-	}).Tag("checkAgentInstalled")
+	l := conn.l.Tag("checkAgentInstalled")
 
 	// TODO: cache checks
 
