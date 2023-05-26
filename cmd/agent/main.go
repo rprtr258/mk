@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/pkg/sftp"
@@ -170,11 +171,17 @@ func main() {
 					}
 					defer agentFile.Close()
 
-					if errUpload := conn.Upload(agentFile, "agent", 0o700); errUpload != nil {
+					remoteAgentBinaryPath := "./agent" // filepath.Join(".", "agent")
+
+					if errUpload := conn.Upload(agentFile, remoteAgentBinaryPath, 0o700); errUpload != nil {
 						return fmt.Errorf("upload agent binary: %w", errUpload)
 					}
 
-					stdout, stderr, errRun := conn.Run("./agent docker containers")
+					stdout, stderr, errRun := conn.Run(strings.Join([]string{
+						remoteAgentBinaryPath,
+						"version",
+						// "docker", "containers",
+					}, " "))
 					log.Info(string(stdout))
 					if len(stderr) != 0 {
 						log.Info("stderr:")
