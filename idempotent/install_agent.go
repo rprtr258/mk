@@ -3,6 +3,7 @@ package idempotent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/pkg/sftp"
+	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
 	"go.uber.org/multierr"
 	"golang.org/x/crypto/ssh"
@@ -226,4 +228,33 @@ func installAgent(ctx context.Context, user, host string, privateKey []byte) err
 	}
 
 	return nil
+}
+
+func agentCall[T any](
+	ctx context.Context,
+	user, host string, privateKey []byte,
+	cmd []string,
+) (T, error) {
+	if errInstall := installAgent(ctx, user, host, privateKey); errInstall != nil {
+		return fun.Zero[T](), errInstall
+	}
+
+	// TODO: reuse ssh conn
+	conn, errSSH := NewSSHConnection(user, host, privateKey)
+	if errSSH != nil {
+		return fun.Zero[T](), errSSH
+	}
+	defer conn.Close()
+
+	stdout, stderr, errRun := conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
+	if errRun != nil {
+		return fun.Zero[T](), fmt.Errorf("lookup containers, stderr=%q: %w", string(stderr), errRun)
+	}
+
+	var result T
+	if errUnmarshal := json.Unmarshal(stdout, &result); errUnmarshal != nil {
+		return fun.Zero[T](), fmt.Errorf("json unmarshal call result, cmd=%v: %w", cmd, errUnmarshal)
+	}
+
+	return result, nil
 }

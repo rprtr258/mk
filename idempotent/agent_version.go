@@ -2,7 +2,6 @@ package idempotent
 
 import (
 	"context"
-	"fmt"
 )
 
 type agentVersion struct {
@@ -30,9 +29,5 @@ func (a *agentVersion) IsCompleted() (bool, error) {
 }
 
 func (a *agentVersion) Perform(ctx context.Context) (string, error) {
-	if errInstall := installAgent(ctx, a.User, a.Host, a.PrivateKey); errInstall != nil {
-		return "", fmt.Errorf("install agent: %w", errInstall)
-	}
-
-	return _agentVersion, nil
+	return agentCall[string](ctx, a.User, a.Host, a.PrivateKey, []string{"version"})
 }

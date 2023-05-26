@@ -23,7 +23,7 @@ func main() {
 				Name:  "version",
 				Usage: "Show mk-agent version",
 				Action: func(*cli.Context) error {
-					fmt.Print(_version)
+					fmt.Printf(`"%s"`, _version)
 					return nil
 				},
 			},
