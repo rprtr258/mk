@@ -1,6 +1,7 @@
 package idempotent
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/rprtr258/mk/conc"
@@ -16,7 +17,7 @@ type Action[T any] interface {
 	// IsCompleted - check whether action need to be run.
 	IsCompleted() (bool, error)
 	// Perform action and return some result. After success, IsCompleted must return true.
-	Perform() (T, error)
+	Perform(context.Context) (T, error)
 }
 
 type sentinelAction[T any] struct {
@@ -27,8 +28,8 @@ func (a sentinelAction[T]) IsCompleted() (bool, error) {
 	return a.action.IsCompleted() //nolint:wrapcheck // return original error
 }
 
-func (a sentinelAction[T]) Perform() (Sentinel, error) {
-	_, err := a.action.Perform()
+func (a sentinelAction[T]) Perform(ctx context.Context) (Sentinel, error) {
+	_, err := a.action.Perform(ctx)
 	return Sentinel{}, err //nolint:wrapcheck // return original error
 }
 
@@ -37,7 +38,7 @@ func RemoveResult[T any](action Action[T]) Action[Sentinel] {
 }
 
 // Perform single action. If it is already completed, no action is performed.
-func Perform(action Action[Sentinel]) error {
+func Perform(ctx context.Context, action Action[Sentinel]) error {
 	completed, errCompleted := action.IsCompleted()
 	if errCompleted != nil {
 		return fmt.Errorf("check isCompleted: %w", errCompleted)
@@ -47,14 +48,14 @@ func Perform(action Action[Sentinel]) error {
 		return nil
 	}
 
-	_, err := action.Perform()
+	_, err := action.Perform(ctx)
 	return err //nolint:wrapcheck // return original error
 }
 
 // Multistep - perform idempotent actions by given order.
-func Multistep(actions ...Action[Sentinel]) error {
+func Multistep(ctx context.Context, actions ...Action[Sentinel]) error {
 	for i, action := range actions {
-		if err := Perform(action); err != nil {
+		if err := Perform(ctx, action); err != nil {
 			return fmt.Errorf("action #%d: %w", i, err)
 		}
 	}
@@ -62,7 +63,7 @@ func Multistep(actions ...Action[Sentinel]) error {
 	return nil
 }
 
-func Parallel(actions ...Action[Sentinel]) error {
+func Parallel(ctx context.Context, actions ...Action[Sentinel]) error {
 	errch := make(chan error)
 	errs := []error{}
 
@@ -75,7 +76,7 @@ func Parallel(actions ...Action[Sentinel]) error {
 	for _, action := range actions {
 		action := action
 		wg.Go(func() {
-			if err := Perform(action); err != nil {
+			if err := Perform(ctx, action); err != nil {
 				errch <- err
 			}
 		})

@@ -1,6 +1,7 @@
 package idempotent
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -78,25 +79,29 @@ func (a *mkdir) IsCompleted() (bool, error) {
 		nil
 }
 
-func (a *mkdir) Perform() (Sentinel, error) {
+func (a *mkdir) perform(context.Context) error {
 	if err := a.inspect(); err != nil {
-		return Sentinel{}, err
+		return err
 	}
 
 	if !a.inspection.exists {
 		if err := os.MkdirAll(a.dirname, a.perm); err != nil {
-			return Sentinel{}, fmt.Errorf("mkdir dirname=%q mode=%v: %w", a.dirname, a.perm, err)
+			return fmt.Errorf("mkdir dirname=%q mode=%v: %w", a.dirname, a.perm, err)
 		}
-		return Sentinel{}, nil
+		return nil
 	}
 
 	if !a.inspection.isDir {
-		return Sentinel{}, fmt.Errorf("%q is a file, not directory", a.dirname)
+		return fmt.Errorf("%q is a file, not directory", a.dirname)
 	}
 
 	if err := os.Chmod(a.dirname, a.perm); err != nil {
-		return Sentinel{}, fmt.Errorf("chmod dirname=%q mode=%v: %w", a.dirname, a.perm, err)
+		return fmt.Errorf("chmod dirname=%q mode=%v: %w", a.dirname, a.perm, err)
 	}
 
-	return Sentinel{}, nil
+	return nil
+}
+
+func (a *mkdir) Perform(ctx context.Context) (Sentinel, error) {
+	return Sentinel{}, a.perform(ctx)
 }
