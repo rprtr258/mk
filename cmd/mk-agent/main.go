@@ -1,10 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/rprtr258/log"
 	"github.com/urfave/cli/v2"
 
@@ -47,7 +47,12 @@ func main() {
 								return fmt.Errorf("get containers: %w", err)
 							}
 
-							spew.Dump(containers)
+							resp, errMarshal := json.Marshal(containers)
+							if errMarshal != nil {
+								return fmt.Errorf("json marshal containers list: %w", errMarshal)
+							}
+
+							fmt.Print(string(resp))
 
 							return nil
 						},

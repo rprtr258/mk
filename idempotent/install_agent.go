@@ -125,7 +125,7 @@ func checkAgentInstalled(_ context.Context, user, host string, privateKey []byte
 	l := log.With(log.F{
 		"user": user,
 		"host": host,
-	})
+	}).Tag("checkAgentInstalled")
 
 	// TODO: cache checks
 
@@ -152,7 +152,9 @@ func checkAgentInstalled(_ context.Context, user, host string, privateKey []byte
 
 	l.Infof("got remote mk-agent version", log.F{"version": string(stdout)})
 
-	return string(stdout) == _agentVersion, nil
+	// TODO: only in dev
+	// return string(stdout) == _agentVersion, nil
+	return false, nil
 }
 
 func installAgent(ctx context.Context, user, host string, privateKey []byte) error {
@@ -224,36 +226,4 @@ func installAgent(ctx context.Context, user, host string, privateKey []byte) err
 	}
 
 	return nil
-}
-
-type agentVersion struct {
-	User       string
-	Host       string
-	PrivateKey []byte
-}
-
-type AgentVersionOptions struct {
-	User       string
-	Host       string
-	PrivateKey []byte
-}
-
-func NewAgentVersion(opts AgentVersionOptions) Action[string] {
-	return &agentVersion{
-		User:       opts.User,
-		Host:       opts.Host,
-		PrivateKey: opts.PrivateKey,
-	}
-}
-
-func (a *agentVersion) IsCompleted() (bool, error) {
-	return false, nil
-}
-
-func (a *agentVersion) Perform(ctx context.Context) (string, error) {
-	if errInstall := installAgent(ctx, a.User, a.Host, a.PrivateKey); errInstall != nil {
-		return "", fmt.Errorf("install agent: %w", errInstall)
-	}
-
-	return _agentVersion, nil
 }
