@@ -12,9 +12,15 @@ import (
 
 	"github.com/pkg/sftp"
 	"github.com/rprtr258/log"
-	"github.com/rprtr258/mk"
 	"go.uber.org/multierr"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/rprtr258/mk"
+)
+
+const (
+	_agentExecutable = "mk-agent"
+	_agentVersion    = "v0.0.0" // TODO: make build time
 )
 
 type SSHConnection struct {
@@ -115,87 +121,47 @@ func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMod
 	return nil
 }
 
-type installAgentInspection struct {
-	agentVersion string // TODO: change to time.Time
-}
+func checkAgentInstalled(_ context.Context, user, host string, privateKey []byte) (bool, error) {
+	l := log.With(log.F{
+		"user": user,
+		"host": host,
+	})
 
-// TODO: steal config, semantics from ansible
-type installAgent struct {
-	User       string
-	Host       string
-	PrivateKey []byte
-	Version    string // TODO: remove?
+	// TODO: cache checks
 
-	inspection *installAgentInspection
-}
-
-type InstallAgentOptions struct {
-	User       string
-	Host       string
-	PrivateKey []byte
-	Version    string
-}
-
-func NewInstallAgent(opts InstallAgentOptions) Action[Sentinel] {
-	return &installAgent{
-		User:       opts.User,
-		Host:       opts.Host,
-		PrivateKey: opts.PrivateKey,
-		Version:    opts.Version,
-		inspection: nil,
-	}
-}
-
-func (a *installAgent) inspect() error {
-	if a.inspection != nil {
-		return nil
-	}
-
-	conn, errSSH := NewSSHConnection(a.User, a.Host, a.PrivateKey)
+	conn, errSSH := NewSSHConnection(user, host, privateKey)
 	if errSSH != nil {
-		return fmt.Errorf("new ssh connection: %w", errSSH)
+		return false, fmt.Errorf("new ssh connection: %w", errSSH)
 	}
 	defer conn.Close()
 
-	stdout, stderr, errAgentVersion := conn.Run("./agent version")
+	stdout, stderr, errAgentVersion := conn.Run("./mk-agent version")
 	if errAgentVersion != nil {
-		// TODO: if not found, just return false
-		return fmt.Errorf(
+		if strings.Contains(string(stderr), "./mk-agent: No such file or directory") {
+			l.Infof("mk-agent is not installed remotely", log.F{"version": string(stdout)})
+
+			return false, nil
+		}
+
+		return false, fmt.Errorf(
 			"get remote mk-agent version, stderr=%q: %w",
 			stderr,
 			errAgentVersion,
 		)
 	}
 
-	log.Infof("remote mk-agent", log.F{
-		"user":             a.User,
-		"host":             a.Host,
-		"version-actual":   string(stdout),
-		"version-expected": a.Version,
-	})
+	l.Infof("got remote mk-agent version", log.F{"version": string(stdout)})
 
-	a.inspection = &installAgentInspection{
-		agentVersion: string(stdout),
-	}
-
-	return nil
+	return string(stdout) == _agentVersion, nil
 }
 
-func (a *installAgent) IsCompleted() (bool, error) {
-	if err := a.inspect(); err != nil {
-		return false, err
-	}
-
-	return a.inspection.agentVersion == a.Version, nil
-}
-
-func (a *installAgent) perform(ctx context.Context) error {
-	isCompleted, err := a.IsCompleted()
+func installAgent(ctx context.Context, user, host string, privateKey []byte) error {
+	isInstalled, err := checkAgentInstalled(ctx, user, host, privateKey)
 	if err != nil {
 		return err
 	}
 
-	if isCompleted {
+	if isInstalled {
 		return nil
 	}
 
@@ -205,12 +171,12 @@ func (a *installAgent) perform(ctx context.Context) error {
 	}
 
 	if _, _, errBuild := mk.ExecContext(ctx,
-		"go", "build", filepath.Join(cwd, "cmd/agent"),
+		"go", "build", filepath.Join(cwd, "cmd", _agentExecutable),
 	); errBuild != nil {
 		return fmt.Errorf("build agent: %w", errBuild)
 	}
 
-	agentBinaryPath := filepath.Join(cwd, "agent")
+	agentBinaryPath := filepath.Join(cwd, _agentExecutable)
 
 	if _, _, errBuild := mk.ExecContext(ctx,
 		"strip", agentBinaryPath,
@@ -224,19 +190,20 @@ func (a *installAgent) perform(ctx context.Context) error {
 		return fmt.Errorf("upx agent binary: %w", errBuild)
 	}
 
-	conn, errSSH := NewSSHConnection(a.User, a.Host, a.PrivateKey)
+	// TODO: reuse ssh conn
+	conn, errSSH := NewSSHConnection(user, host, privateKey)
 	if errSSH != nil {
 		return errSSH
 	}
 	defer conn.Close()
 
-	agentFile, errOpen := os.Open(filepath.Join(cwd, "agent"))
+	agentFile, errOpen := os.Open(filepath.Join(cwd, _agentExecutable))
 	if errOpen != nil {
 		return fmt.Errorf("open agent binary: %w", errOpen)
 	}
 	defer agentFile.Close()
 
-	remoteAgentBinaryPath := "./agent" // filepath.Join(".", "agent")
+	remoteAgentBinaryPath := "./" + _agentExecutable
 
 	const agentFilePerms = 0o700
 	if errUpload := conn.Upload(agentFile, remoteAgentBinaryPath, agentFilePerms); errUpload != nil {
@@ -259,6 +226,34 @@ func (a *installAgent) perform(ctx context.Context) error {
 	return nil
 }
 
-func (a *installAgent) Perform(ctx context.Context) (Sentinel, error) {
-	return Sentinel{}, a.perform(ctx)
+type agentVersion struct {
+	User       string
+	Host       string
+	PrivateKey []byte
+}
+
+type AgentVersionOptions struct {
+	User       string
+	Host       string
+	PrivateKey []byte
+}
+
+func NewAgentVersion(opts AgentVersionOptions) Action[string] {
+	return &agentVersion{
+		User:       opts.User,
+		Host:       opts.Host,
+		PrivateKey: opts.PrivateKey,
+	}
+}
+
+func (a *agentVersion) IsCompleted() (bool, error) {
+	return false, nil
+}
+
+func (a *agentVersion) Perform(ctx context.Context) (string, error) {
+	if errInstall := installAgent(ctx, a.User, a.Host, a.PrivateKey); errInstall != nil {
+		return "", fmt.Errorf("install agent: %w", errInstall)
+	}
+
+	return _agentVersion, nil
 }

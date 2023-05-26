@@ -21,7 +21,7 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name:  "version",
-				Usage: "Show mk agent version",
+				Usage: "Show mk-agent version",
 				Action: func(*cli.Context) error {
 					fmt.Print(_version)
 					return nil
