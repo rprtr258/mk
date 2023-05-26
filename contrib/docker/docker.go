@@ -137,9 +137,44 @@ func NeedsRecreate(container ContainerConfig, policy ContainerPolicy) bool {
 		(policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap())
 }
 
+func ContainerRun(container ContainerConfig) error {
+	return fmt.Errorf("not implemented")
+}
+
+func ContainerStart(container ContainerConfig) error {
+	return fmt.Errorf("not implemented")
+}
+
+func ContainerCreate(container ContainerConfig) error {
+	return fmt.Errorf("not implemented")
+}
+
+func ContainerStop(container ContainerConfig) error {
+	return fmt.Errorf("not implemented")
+}
+
+func ContainerRemove(container ContainerConfig) error {
+	return fmt.Errorf("not implemented")
+}
+
+// TODO: use
+func ContainerRestart(container ContainerConfig) error {
+	// TODO: do in one command
+	if errStop := ContainerStop(container); errStop != nil {
+		return fmt.Errorf("restart container %#v, stopping: %w", container, errStop)
+	}
+
+	if errStart := ContainerStart(container); errStart != nil {
+		return fmt.Errorf("restart container %#v, starting: %w", container, errStart)
+	}
+
+	return nil
+}
+
 func Reconciliate(container ContainerConfig, policy ContainerPolicy) error {
 	if NeedsRecreate(container, policy) {
-		return nil // TODO: recreate
+		// TODO: if remove stops container, it doesn't need to be stopped beforehand
+		return nil // TODO: recreate = stop, remove, run
 	}
 
 	switch policy.State {
@@ -148,9 +183,9 @@ func Reconciliate(container ContainerConfig, policy ContainerPolicy) error {
 		case ContainerStateRunning, ContainerStateRestarting:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			return nil // TODO: run
+			return ContainerStart(container)
 		case ContainerStateRemoving:
-			return nil // TODO: create, then run
+			return ContainerRun(container)
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to start from dead state")
 		default:
@@ -161,9 +196,9 @@ func Reconciliate(container ContainerConfig, policy ContainerPolicy) error {
 		case ContainerStateRemoving:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			return nil // TODO: remove
+			return ContainerRemove(container)
 		case ContainerStateRunning, ContainerStateRestarting:
-			return nil // TODO: stop, then remove
+			return ContainerRemove(container)
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to remove from dead state")
 		default:
@@ -177,7 +212,7 @@ func Reconciliate(container ContainerConfig, policy ContainerPolicy) error {
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to become present from dead state")
 		case ContainerStateRemoving:
-			return nil // TODO: start
+			return ContainerCreate(container)
 		default:
 			return fmt.Errorf("don't know how to become present from state %v", container.State)
 		}
@@ -186,7 +221,7 @@ func Reconciliate(container ContainerConfig, policy ContainerPolicy) error {
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateRemoving, ContainerStateExited:
 			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
-			return nil // TODO: stop
+			return ContainerStop(container)
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to stop from dead state")
 		default:
