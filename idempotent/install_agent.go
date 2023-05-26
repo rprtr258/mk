@@ -157,7 +157,7 @@ func (a *installAgent) inspect() error {
 	}
 	defer conn.Close()
 
-	stdout, stderr, errAgentVersion := conn.Run("./mk-agent version")
+	stdout, stderr, errAgentVersion := conn.Run("./agent version")
 	if errAgentVersion != nil {
 		// TODO: if not found, just return false
 		return fmt.Errorf(
@@ -167,7 +167,17 @@ func (a *installAgent) inspect() error {
 		)
 	}
 
-	a.inspection.agentVersion = string(stdout)
+	log.Infof("remote mk-agent", log.F{
+		"user":             a.User,
+		"host":             a.Host,
+		"version-actual":   string(stdout),
+		"version-expected": a.Version,
+	})
+
+	a.inspection = &installAgentInspection{
+		agentVersion: string(stdout),
+	}
+
 	return nil
 }
 
@@ -214,12 +224,7 @@ func (a *installAgent) perform(ctx context.Context) error {
 		return fmt.Errorf("upx agent binary: %w", errBuild)
 	}
 
-	privateKey, errKey := os.ReadFile("/home/rprtr258/.ssh/rus_rprtr258")
-	if errKey != nil {
-		return fmt.Errorf("read private key: %w", errKey)
-	}
-
-	conn, errSSH := NewSSHConnection("rprtr258", "rus", privateKey)
+	conn, errSSH := NewSSHConnection(a.User, a.Host, a.PrivateKey)
 	if errSSH != nil {
 		return errSSH
 	}
