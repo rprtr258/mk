@@ -5,6 +5,7 @@ go 1.19
 require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/docker v20.10.24+incompatible
+	github.com/docker/go-connections v0.4.0
 	github.com/pkg/sftp v1.13.5
 	github.com/rprtr258/fun v0.0.2
 	github.com/rprtr258/log v0.0.5
@@ -17,7 +18,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/docker/distribution v2.8.2+incompatible // indirect
-	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
