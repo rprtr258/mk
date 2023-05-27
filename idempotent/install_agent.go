@@ -218,23 +218,38 @@ func AgentQuery[T any](
 
 	var result T
 	if errUnmarshal := json.Unmarshal(stdout, &result); errUnmarshal != nil {
-		return fun.Zero[T](), fmt.Errorf("json unmarshal call result, cmd=%v, stdout=%q: %w", cmd, string(stdout), errUnmarshal)
+		return fun.Zero[T](), fmt.Errorf(
+			"json unmarshal call result, cmd=%v, stdout=%q: %w",
+			cmd,
+			string(stdout),
+			errUnmarshal,
+		)
 	}
 
 	return result, nil
 }
 
-func AgentCommand(
+func AgentCommand[T any](
 	ctx context.Context,
 	conn SSHConnection,
 	cmd []string,
+	arg T,
 ) error {
+	argBytes, errMarshal := json.Marshal(arg)
+	if errMarshal != nil {
+		return fmt.Errorf("json marshal arg=%+v: %w", arg, errMarshal)
+	}
+
+	args := append([]string{"./mk-agent"}, cmd...)
+	// TODO: gzip args, validate args length, chunk args
+	args = append(args, string(argBytes))
+	fullCmd := strings.Join(args, " ")
+
 	if errInstall := installAgent(ctx, conn); errInstall != nil {
 		return errInstall
 	}
 
-	// TODO: gzip args, validate args length, chunk args
-	stdout, stderr, errRun := conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
+	stdout, stderr, errRun := conn.Run(fullCmd)
 	if errRun != nil {
 		return fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
 	}
