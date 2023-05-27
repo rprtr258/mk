@@ -53,7 +53,11 @@ type ContainerConfig struct {
 }
 
 func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerConfig, error) {
-	containers, err := c.client.ContainerList(ctx, types.ContainerListOptions{}) //nolint:exhaustruct // no options
+	containers, err := c.client.ContainerList(
+		ctx,
+		types.ContainerListOptions{ //nolint:exhaustruct // other options are not needed
+			All: true,
+		})
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
@@ -283,7 +287,10 @@ func (c Client) ContainerRun(ctx context.Context, policy ContainerPolicy) error 
 }
 
 func (c Client) ContainerStop(ctx context.Context, containerID ContainerID) error {
-	return c.client.ContainerStop(ctx, string(containerID), nil) //nolint:wrapcheck // lazy
+	if errStop := c.client.ContainerStop(ctx, string(containerID), nil); errStop != nil {
+		return fmt.Errorf("stop container %q: %w", containerID, errStop)
+	}
+	return nil
 }
 
 func (c Client) ContainerRemove(ctx context.Context, containerID ContainerID) error {
@@ -342,12 +349,12 @@ func Reconcile( //nolint:funlen,gocognit,cyclop // fuckyou
 		case ContainerStateRunning, ContainerStateRestarting:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			if errRun := client.ContainerRun(ctx, policy); errRun != nil {
+			if errRun := client.ContainerStart(ctx, container.ID); errRun != nil {
 				return fmt.Errorf("container %s stopped, running it: %w", container.ID, errRun)
 			}
 			return nil
 		case ContainerStateRemoving:
-			if errStart := client.ContainerStart(ctx, container.ID); errStart != nil {
+			if errStart := client.ContainerRun(ctx, policy); errStart != nil {
 				return fmt.Errorf("container %s removed, starting it: %w", container.ID, errStart)
 			}
 			return nil
@@ -366,8 +373,11 @@ func Reconcile( //nolint:funlen,gocognit,cyclop // fuckyou
 			}
 			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
+			if errStop := client.ContainerStop(ctx, container.ID); errStop != nil {
+				return fmt.Errorf("container %s running, stopping it: %w", container.ID, errStop)
+			}
 			if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
-				return fmt.Errorf("container %s running, stopping and removing it: %w", container.ID, errRemove)
+				return fmt.Errorf("container %s running, removing it: %w", container.ID, errRemove)
 			}
 			return nil
 		case ContainerStateDead:

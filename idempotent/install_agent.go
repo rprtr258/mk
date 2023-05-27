@@ -145,6 +145,7 @@ func checkAgentInstalled(
 	l.Infof("got remote mk-agent version", log.F{"version": version})
 
 	// TODO: only in dev
+	// TODO: compare executable hash instead
 	// return version == _agentVersion, nil
 	return false, nil
 }

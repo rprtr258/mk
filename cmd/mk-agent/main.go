@@ -92,7 +92,7 @@ func main() {
 											Networks:      nil,
 											Volumes:       nil,
 											RestartPolicy: fun.Option[docker.RestartPolicy]{},
-											State:         docker.ContainerDesiredStateStarted,
+											State:         docker.ContainerDesiredStateAbsent,
 											Cmd:           fun.Valid([]string{"sleep", "infinity"}),
 										},
 									})
