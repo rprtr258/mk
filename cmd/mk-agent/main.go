@@ -11,8 +11,6 @@ import (
 	"github.com/rprtr258/mk/contrib/docker"
 )
 
-const _version = "v0.0.0" // TODO: change to datetime
-
 var _subcommandDocker = &cli.Command{ //nolint:exhaustruct // pohuy
 	Name:            "docker",
 	Usage:           "Get info about docker resources",
@@ -101,14 +99,6 @@ func main() {
 		HideHelpCommand: true,
 		HideHelp:        true,
 		Commands: []*cli.Command{
-			{
-				Name:  "version",
-				Usage: "Show mk-agent version",
-				Action: func(*cli.Context) error {
-					fmt.Printf(`"%s"`, _version)
-					return nil
-				},
-			},
 			_subcommandDocker,
 		},
 	}).Run(os.Args); err != nil {

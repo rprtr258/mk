@@ -9,6 +9,7 @@ import (
 	dockerClient "github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/rprtr258/fun"
+	"github.com/rprtr258/log"
 )
 
 type Client struct {
@@ -294,14 +295,18 @@ func (c Client) ContainerStop(ctx context.Context, containerID ContainerID) erro
 }
 
 func (c Client) ContainerRemove(ctx context.Context, containerID ContainerID) error {
-	return c.client.ContainerRemove( //nolint:wrapcheck // lazy
+	log.Debugf("removing container", log.F{"container_id": containerID})
+	if errRemove := c.client.ContainerRemove(
 		ctx,
 		string(containerID),
 		types.ContainerRemoveOptions{
 			RemoveVolumes: true,
 			Force:         false,
 			RemoveLinks:   false,
-		})
+		}); errRemove != nil {
+		return fmt.Errorf("remove container %q: %w", containerID, errRemove)
+	}
+	return nil
 }
 
 // TODO: use
@@ -328,6 +333,10 @@ func Reconcile( //nolint:funlen,gocognit,cyclop // fuckyou
 	containerMaybe fun.Option[ContainerConfig],
 ) error {
 	if !containerMaybe.Valid() {
+		if policy.State == ContainerDesiredStateAbsent {
+			return nil
+		}
+
 		if errRun := client.ContainerRun(ctx, policy); errRun != nil {
 			return fmt.Errorf("no container found, creating and running it: %w", errRun)
 		}

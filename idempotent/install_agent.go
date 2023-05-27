@@ -3,12 +3,15 @@ package idempotent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/pkg/sftp"
@@ -96,6 +99,11 @@ func (conn SSHConnection) Run(cmd string) ( //nolint:nonamedreturns // too many 
 	session.Stderr = &errB
 	conn.l.Debugf("executing command remotely", log.F{"command": cmd})
 	errCmd := session.Run(cmd)
+	conn.l.Debugf("command finished", log.F{
+		"command": cmd,
+		"stdout":  outB.String(),
+		"stderr":  errB.String(),
+	})
 	return outB.Bytes(), errB.Bytes(), errCmd
 }
 
@@ -118,36 +126,39 @@ func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMod
 	return nil
 }
 
-func checkAgentInstalled(
+func getRemoteAgentHash(
 	_ context.Context,
 	conn SSHConnection,
-) (bool, error) { //nolint:unparam // TODO: remove nolint when fix version checking
+) (string, error) {
 	l := conn.l.Tag("checkAgentInstalled")
 
-	// TODO: cache checks
-
-	stdout, stderr, errAgentVersion := conn.Run("./mk-agent version")
+	// TODO: behold not having sha256sum on remote
+	stdout, stderr, errAgentVersion := conn.Run("sha256sum mk-agent")
 	if errAgentVersion != nil {
-		if strings.Contains(string(stderr), "./mk-agent: No such file or directory") {
+		if strings.Contains(string(stderr), "sha256sum: mk-agent: No such file or directory") {
 			l.Info("mk-agent is not installed remotely")
-
-			return false, nil
+			return "", nil // TODO: not found error
 		}
 
-		return false, fmt.Errorf("get actual mk-agent version: %w", errAgentVersion)
+		return "", fmt.Errorf("get actual mk-agent version: %w", errAgentVersion)
 	}
 
-	var version string
-	if errUnmarshal := json.Unmarshal(stdout, &version); errUnmarshal != nil {
-		return false, fmt.Errorf("json unmarshal mk-agent version: %w", errUnmarshal)
+	return string(stdout[:64]), nil
+}
+
+// TODO: return bytes
+func getBinaryHash(path string) (string, error) {
+	agentFileBytes, errRead := os.ReadFile(path)
+	if errRead != nil {
+		return "", fmt.Errorf("read agent binary for hashing: %w", errRead)
 	}
 
-	l.Infof("got remote mk-agent version", log.F{"version": version})
+	hasher := sha256.New()
+	if _, errHash := io.Copy(hasher, bytes.NewReader(agentFileBytes)); errHash != nil {
+		return "", fmt.Errorf("hash agent binary: %w", errHash)
+	}
 
-	// TODO: only in dev
-	// TODO: compare executable hash instead
-	// return version == _agentVersion, nil
-	return false, nil
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
@@ -176,7 +187,7 @@ func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("upx agent binary: %w", errBuild)
 	}
 
-	agentFile, errOpen := os.Open(filepath.Join(cwd, _agentExecutable))
+	agentFile, errOpen := os.Open(agentBinaryPath)
 	if errOpen != nil {
 		return nil, fmt.Errorf("open agent binary: %w", errOpen)
 	}
@@ -184,13 +195,43 @@ func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
 	return agentFile, nil
 }
 
-func installAgent(ctx context.Context, conn SSHConnection) error {
-	isInstalled, err := checkAgentInstalled(ctx, conn)
-	if err != nil {
-		return err
+func remoteNeedsToBeUpdated(ctx context.Context, conn SSHConnection) (bool, error) {
+	remoteHash, errLocalHash := getRemoteAgentHash(ctx, conn)
+	if errLocalHash != nil {
+		return false, errLocalHash
 	}
 
-	if isInstalled {
+	if remoteHash == "" {
+		// not installed
+		return true, nil
+	}
+
+	cwd, errCwd := os.Getwd()
+	if errCwd != nil {
+		return false, fmt.Errorf("get cwd: %w", errCwd)
+	}
+
+	// TODO: get remote in prod, local in dev
+	localHash, errLocalHash := getBinaryHash(filepath.Join(cwd, _agentExecutable))
+	if errLocalHash != nil {
+		return false, fmt.Errorf("get local agent binary hash: %w", errLocalHash)
+	}
+
+	log.Debugf("comparing agent hashes", log.F{
+		"remoteHash": remoteHash,
+		"localHash":  localHash,
+	})
+	return remoteHash != localHash, nil
+}
+
+func installAgent(ctx context.Context, conn SSHConnection) error {
+	// TODO: cache
+	needToUpdate, errCheck := remoteNeedsToBeUpdated(ctx, conn)
+	if errCheck != nil {
+		return fmt.Errorf("check if remote needs to be updated: %w", errCheck)
+	}
+
+	if !needToUpdate {
 		return nil
 	}
 
@@ -252,7 +293,7 @@ func AgentCommand[T any](
 
 	args := append([]string{"./mk-agent"}, cmd...)
 	// TODO: gzip args, validate args length, chunk args
-	args = append(args, string(argBytes))
+	args = append(args, strconv.Quote(string(argBytes)))
 	fullCmd := strings.Join(args, " ")
 
 	if errInstall := installAgent(ctx, conn); errInstall != nil {
