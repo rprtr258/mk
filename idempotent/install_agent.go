@@ -150,6 +150,35 @@ func checkAgentInstalled(
 	return false, nil
 }
 
+func buildAgentBinary(ctx context.Context) (string, error) {
+	cwd, errCwd := os.Getwd()
+	if errCwd != nil {
+		return "", fmt.Errorf("get cwd: %w", errCwd)
+	}
+
+	if _, _, errBuild := mk.ExecContext(ctx,
+		"go", "build", filepath.Join(cwd, "cmd", _agentExecutable),
+	); errBuild != nil {
+		return "", fmt.Errorf("build agent: %w", errBuild)
+	}
+
+	agentBinaryPath := filepath.Join(cwd, _agentExecutable)
+
+	if _, _, errBuild := mk.ExecContext(ctx,
+		"strip", agentBinaryPath,
+	); errBuild != nil {
+		return "", fmt.Errorf("strip agent binary: %w", errBuild)
+	}
+
+	if _, _, errBuild := mk.ExecContext(ctx,
+		"upx", agentBinaryPath,
+	); errBuild != nil {
+		return "", fmt.Errorf("upx agent binary: %w", errBuild)
+	}
+
+	return filepath.Join(cwd, _agentExecutable), nil
+}
+
 func installAgent(ctx context.Context, conn SSHConnection) error {
 	isInstalled, err := checkAgentInstalled(ctx, conn)
 	if err != nil {
@@ -160,32 +189,12 @@ func installAgent(ctx context.Context, conn SSHConnection) error {
 		return nil
 	}
 
-	cwd, errCwd := os.Getwd()
-	if errCwd != nil {
-		return fmt.Errorf("get cwd: %w", errCwd)
+	binaryPath, errBuild := buildAgentBinary(ctx)
+	if errBuild != nil {
+		return fmt.Errorf("build agent binary: %w", errBuild)
 	}
 
-	if _, _, errBuild := mk.ExecContext(ctx,
-		"go", "build", filepath.Join(cwd, "cmd", _agentExecutable),
-	); errBuild != nil {
-		return fmt.Errorf("build agent: %w", errBuild)
-	}
-
-	agentBinaryPath := filepath.Join(cwd, _agentExecutable)
-
-	if _, _, errBuild := mk.ExecContext(ctx,
-		"strip", agentBinaryPath,
-	); errBuild != nil {
-		return fmt.Errorf("strip agent binary: %w", errBuild)
-	}
-
-	if _, _, errBuild := mk.ExecContext(ctx,
-		"upx", agentBinaryPath,
-	); errBuild != nil {
-		return fmt.Errorf("upx agent binary: %w", errBuild)
-	}
-
-	agentFile, errOpen := os.Open(filepath.Join(cwd, _agentExecutable))
+	agentFile, errOpen := os.Open(binaryPath)
 	if errOpen != nil {
 		return fmt.Errorf("open agent binary: %w", errOpen)
 	}
