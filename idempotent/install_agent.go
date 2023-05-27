@@ -150,16 +150,16 @@ func checkAgentInstalled(
 	return false, nil
 }
 
-func buildAgentBinary(ctx context.Context) (string, error) {
+func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
 	cwd, errCwd := os.Getwd()
 	if errCwd != nil {
-		return "", fmt.Errorf("get cwd: %w", errCwd)
+		return nil, fmt.Errorf("get cwd: %w", errCwd)
 	}
 
 	if _, _, errBuild := mk.ExecContext(ctx,
 		"go", "build", filepath.Join(cwd, "cmd", _agentExecutable),
 	); errBuild != nil {
-		return "", fmt.Errorf("build agent: %w", errBuild)
+		return nil, fmt.Errorf("build agent: %w", errBuild)
 	}
 
 	agentBinaryPath := filepath.Join(cwd, _agentExecutable)
@@ -167,16 +167,21 @@ func buildAgentBinary(ctx context.Context) (string, error) {
 	if _, _, errBuild := mk.ExecContext(ctx,
 		"strip", agentBinaryPath,
 	); errBuild != nil {
-		return "", fmt.Errorf("strip agent binary: %w", errBuild)
+		return nil, fmt.Errorf("strip agent binary: %w", errBuild)
 	}
 
 	if _, _, errBuild := mk.ExecContext(ctx,
 		"upx", agentBinaryPath,
 	); errBuild != nil {
-		return "", fmt.Errorf("upx agent binary: %w", errBuild)
+		return nil, fmt.Errorf("upx agent binary: %w", errBuild)
 	}
 
-	return filepath.Join(cwd, _agentExecutable), nil
+	agentFile, errOpen := os.Open(filepath.Join(cwd, _agentExecutable))
+	if errOpen != nil {
+		return nil, fmt.Errorf("open agent binary: %w", errOpen)
+	}
+
+	return agentFile, nil
 }
 
 func installAgent(ctx context.Context, conn SSHConnection) error {
@@ -189,14 +194,10 @@ func installAgent(ctx context.Context, conn SSHConnection) error {
 		return nil
 	}
 
-	binaryPath, errBuild := buildAgentBinary(ctx)
+	// TODO: switch between compile and download from github
+	agentFile, errBuild := getAgentBinary(ctx)
 	if errBuild != nil {
-		return fmt.Errorf("build agent binary: %w", errBuild)
-	}
-
-	agentFile, errOpen := os.Open(binaryPath)
-	if errOpen != nil {
-		return fmt.Errorf("open agent binary: %w", errOpen)
+		return fmt.Errorf("get agent binary: %w", errBuild)
 	}
 	defer agentFile.Close()
 
