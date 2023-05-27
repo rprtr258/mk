@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
 	"github.com/urfave/cli/v2"
 
@@ -34,27 +35,78 @@ func main() {
 				HideHelp:        true,
 				Subcommands: []*cli.Command{
 					{
-						Name:  "containers",
-						Usage: "Get info about docker containers",
-						Action: func(ctx *cli.Context) error {
-							client, err := docker.NewClient()
-							if err != nil {
-								return fmt.Errorf("new client: %w", err)
-							}
+						Name:            "container",
+						Usage:           "Get info about docker containers",
+						HideHelpCommand: true,
+						HideHelp:        true,
+						Subcommands: []*cli.Command{
+							{
+								Name:            "ls",
+								Usage:           "List containers",
+								HideHelpCommand: true,
+								HideHelp:        true,
+								Action: func(ctx *cli.Context) error {
+									client, err := docker.NewClient()
+									if err != nil {
+										return fmt.Errorf("new client: %w", err)
+									}
 
-							containers, err := client.Containers(ctx.Context)
-							if err != nil {
-								return fmt.Errorf("get containers: %w", err)
-							}
+									containers, err := client.ContainersList(ctx.Context)
+									if err != nil {
+										return fmt.Errorf("get containers: %w", err)
+									}
 
-							resp, errMarshal := json.Marshal(containers)
-							if errMarshal != nil {
-								return fmt.Errorf("json marshal containers list: %w", errMarshal)
-							}
+									resp, errMarshal := json.Marshal(containers)
+									if errMarshal != nil {
+										return fmt.Errorf("json marshal containers list: %w", errMarshal)
+									}
 
-							fmt.Print(string(resp))
+									fmt.Print(string(resp))
 
-							return nil
+									return nil
+								},
+							},
+							{
+								// TODO: change to multiple containers
+								Name:            "reconcile",
+								Usage:           "Reconcile container",
+								HideHelpCommand: true,
+								HideHelp:        true,
+								Action: func(ctx *cli.Context) error {
+									client, err := docker.NewClient()
+									if err != nil {
+										return fmt.Errorf("new client: %w", err)
+									}
+
+									containers, err := client.ContainersList(ctx.Context)
+									if err != nil {
+										return fmt.Errorf("get containers: %w", err)
+									}
+
+									matching := docker.MatchPolicies(containers, []docker.ContainerPolicy{
+										// TODO: get from args
+										{
+											Name:          "test-container",
+											Hostname:      fun.Option[string]{},
+											Image:         "alpine:latest",
+											Networks:      nil,
+											Volumes:       nil,
+											RestartPolicy: fun.Option[docker.RestartPolicy]{},
+											State:         docker.ContainerDesiredStateStarted,
+											Cmd:           fun.Valid([]string{"sleep", "infinity"}),
+										},
+									})
+
+									for _, match := range matching {
+										if errReconcile := docker.Reconcile(ctx.Context, client, match.Policy, match.Container); errReconcile != nil {
+											// TODO: print errors as json to parse on client
+											return fmt.Errorf("reconcile, policy=%+v: %w", match.Policy, errReconcile)
+										}
+									}
+
+									return nil
+								},
+							},
 						},
 					},
 				},

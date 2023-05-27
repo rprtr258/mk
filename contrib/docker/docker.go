@@ -52,7 +52,7 @@ type ContainerConfig struct {
 	Cmd           []string
 }
 
-func (c Client) Containers(ctx context.Context) (map[ContainerID]ContainerConfig, error) {
+func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerConfig, error) {
 	containers, err := c.client.ContainerList(ctx, types.ContainerListOptions{}) //nolint:exhaustruct // no options
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
@@ -86,7 +86,7 @@ func (c Client) Containers(ctx context.Context) (map[ContainerID]ContainerConfig
 
 		var restartPolicy RestartPolicy
 		switch details.HostConfig.RestartPolicy.Name {
-		case "no":
+		case "no", "":
 			restartPolicy = RestartPolicyNo
 		case "on-failure":
 			restartPolicy = RestartPolicyOnFailure
@@ -95,13 +95,13 @@ func (c Client) Containers(ctx context.Context) (map[ContainerID]ContainerConfig
 		case "always":
 			restartPolicy = RestartPolicyAlways
 		default:
-			return nil, fmt.Errorf("unknown restart policy: %s", details.HostConfig.RestartPolicy.Name)
+			return nil, fmt.Errorf("unknown restart policy: %q", details.HostConfig.RestartPolicy.Name)
 		}
 
 		containerID := ContainerID(container.ID)
 		res[containerID] = ContainerConfig{
 			ID:       containerID,
-			Name:     details.Name,
+			Name:     details.Name[1:], // strip leading slash
 			Hostname: details.Config.Hostname,
 			// TODO: store label instead?
 			Image:         details.Image, // TODO: image hash
@@ -176,14 +176,26 @@ func compareLists[T comparable](xs, ys []T) bool {
 	return true
 }
 
-func needsRecreate(container ContainerConfig, policy ContainerPolicy) bool {
+func needsRecreate(
+	ctx context.Context,
+	client Client,
+	container ContainerConfig,
+	policy ContainerPolicy,
+) (bool, error) {
+	image, _, errInspect := client.client.ImageInspectWithRaw(ctx, policy.Image)
+	if errInspect != nil {
+		return false, fmt.Errorf("find image with label=%q: %w", policy.Image, errInspect)
+	}
+
+	imageID := image.ID
+
 	return container.Name != policy.Name ||
 		(policy.Hostname.Valid() && container.Hostname != policy.Hostname.Unwrap()) ||
-		container.Image != policy.Image ||
+		container.Image != imageID ||
 		!elementsMatch(container.Networks, policy.Networks) ||
 		!elementsMatch(container.Volumes, policy.Volumes) ||
 		(policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap()) ||
-		(policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd))
+		(policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd)), nil
 }
 
 func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
@@ -196,7 +208,27 @@ func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) err
 		})
 }
 
+func (c Client) ImagePull(ctx context.Context, label string) error {
+	r, errPull := c.client.ImagePull(ctx, label, types.ImagePullOptions{}) //nolint:exhaustruct // no options
+	if errPull != nil {
+		return fmt.Errorf("pull image: %w", errPull)
+	}
+	defer r.Close()
+
+	resp, errLoad := c.client.ImageLoad(ctx, r, false)
+	if errLoad != nil {
+		return fmt.Errorf("load image: %w", errLoad)
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
 func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (ContainerID, error) {
+	if errPullImage := c.ImagePull(ctx, policy.Image); errPullImage != nil {
+		return "", fmt.Errorf("pull image: %w", errPullImage)
+	}
+
 	var restartPolicy container.RestartPolicy
 	if policy.RestartPolicy.Valid() {
 		switch policy.RestartPolicy.Unwrap() {
@@ -281,18 +313,25 @@ func (c Client) ContainerRestart(ctx context.Context, containerID ContainerID) e
 	return nil
 }
 
-func Reconciliate(
+// TODO: return actions list instead
+func Reconcile( //nolint:funlen,gocognit,cyclop // fuckyou
 	ctx context.Context,
 	client Client,
 	policy ContainerPolicy,
 	containerMaybe fun.Option[ContainerConfig],
 ) error {
 	if !containerMaybe.Valid() {
-		return client.ContainerRun(ctx, policy)
+		if errRun := client.ContainerRun(ctx, policy); errRun != nil {
+			return fmt.Errorf("no container found, creating and running it: %w", errRun)
+		}
 	}
 
 	container := containerMaybe.Unwrap()
-	if needsRecreate(container, policy) {
+
+	recreate, err := needsRecreate(ctx, client, container, policy)
+	if err != nil {
+		return fmt.Errorf("check needs recreate: %w", err)
+	} else if recreate {
 		// TODO: if remove stops container, it doesn't need to be stopped beforehand
 		return nil // TODO: recreate = stop, remove, run
 	}
@@ -303,9 +342,15 @@ func Reconciliate(
 		case ContainerStateRunning, ContainerStateRestarting:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			return client.ContainerStart(ctx, container.ID)
+			if errRun := client.ContainerRun(ctx, policy); errRun != nil {
+				return fmt.Errorf("container %s stopped, running it: %w", container.ID, errRun)
+			}
+			return nil
 		case ContainerStateRemoving:
-			return client.ContainerRun(ctx, policy)
+			if errStart := client.ContainerStart(ctx, container.ID); errStart != nil {
+				return fmt.Errorf("container %s removed, starting it: %w", container.ID, errStart)
+			}
+			return nil
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to start from dead state")
 		default:
@@ -316,9 +361,15 @@ func Reconciliate(
 		case ContainerStateRemoving:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			return client.ContainerRemove(ctx, container.ID)
+			if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
+				return fmt.Errorf("container %s present, removing it: %w", container.ID, errRemove)
+			}
+			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
-			return client.ContainerRemove(ctx, container.ID)
+			if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
+				return fmt.Errorf("container %s running, stopping and removing it: %w", container.ID, errRemove)
+			}
+			return nil
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to remove from dead state")
 		default:
@@ -332,8 +383,10 @@ func Reconciliate(
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to become present from dead state")
 		case ContainerStateRemoving:
-			_, errCreate := client.ContainerCreate(ctx, policy)
-			return errCreate
+			if containerID, errCreate := client.ContainerCreate(ctx, policy); errCreate != nil {
+				return fmt.Errorf("container %s removed, creating it with id=%s: %w", container.ID, containerID, errCreate)
+			}
+			return nil
 		default:
 			return fmt.Errorf("don't know how to become present from state %v", container.State)
 		}
@@ -342,7 +395,10 @@ func Reconciliate(
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateRemoving, ContainerStateExited:
 			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
-			return client.ContainerStop(ctx, container.ID)
+			if errStop := client.ContainerStop(ctx, container.ID); errStop != nil {
+				return fmt.Errorf("container %s running, stopping it: %w", container.ID, errStop)
+			}
+			return nil
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to stop from dead state")
 		default:
@@ -358,7 +414,7 @@ type PolicyMatch struct {
 	Container fun.Option[ContainerConfig]
 }
 
-func MatchPolicies(containers map[string]ContainerConfig, policies []ContainerPolicy) []PolicyMatch {
+func MatchPolicies(containers map[ContainerID]ContainerConfig, policies []ContainerPolicy) []PolicyMatch {
 	containersByName := make(map[string]ContainerConfig, len(containers))
 	for _, container := range containers {
 		containersByName[container.Name] = container

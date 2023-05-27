@@ -200,7 +200,7 @@ func installAgent(ctx context.Context, conn SSHConnection) error {
 	return nil
 }
 
-func agentCall[T any](
+func AgentQuery[T any](
 	ctx context.Context,
 	conn SSHConnection,
 	cmd []string,
@@ -209,15 +209,38 @@ func agentCall[T any](
 		return fun.Zero[T](), errInstall
 	}
 
+	// TODO: gzip args, validate args length, chunk args
 	stdout, stderr, errRun := conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
 	if errRun != nil {
-		return fun.Zero[T](), fmt.Errorf("lookup containers, stderr=%q: %w", string(stderr), errRun)
+		return fun.Zero[T](), fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
 	}
 
 	var result T
 	if errUnmarshal := json.Unmarshal(stdout, &result); errUnmarshal != nil {
-		return fun.Zero[T](), fmt.Errorf("json unmarshal call result, cmd=%v: %w", cmd, errUnmarshal)
+		return fun.Zero[T](), fmt.Errorf("json unmarshal call result, cmd=%v, stdout=%q: %w", cmd, string(stdout), errUnmarshal)
 	}
 
 	return result, nil
+}
+
+func AgentCommand(
+	ctx context.Context,
+	conn SSHConnection,
+	cmd []string,
+) error {
+	if errInstall := installAgent(ctx, conn); errInstall != nil {
+		return errInstall
+	}
+
+	// TODO: gzip args, validate args length, chunk args
+	stdout, stderr, errRun := conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
+	if errRun != nil {
+		return fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
+	}
+
+	if len(stdout) != 0 {
+		log.Infof(string(stdout), log.F{"cmd": cmd})
+	}
+
+	return nil
 }

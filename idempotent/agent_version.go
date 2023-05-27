@@ -23,5 +23,5 @@ func (a *agentVersion) IsCompleted() (bool, error) {
 }
 
 func (a *agentVersion) Perform(ctx context.Context) (string, error) {
-	return agentCall[string](ctx, a.conn, []string{"version"})
+	return AgentQuery[string](ctx, a.conn, []string{"version"})
 }
