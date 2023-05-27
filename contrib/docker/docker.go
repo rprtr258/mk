@@ -326,7 +326,7 @@ func (c Client) ContainerRestart(ctx context.Context, containerID ContainerID) e
 }
 
 // TODO: return actions list instead
-func Reconcile( //nolint:funlen,gocognit,cyclop // fuckyou
+func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 	ctx context.Context,
 	client Client,
 	policy ContainerPolicy,
