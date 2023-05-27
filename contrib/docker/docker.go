@@ -36,8 +36,10 @@ const (
 	ContainerStateDead
 )
 
+type ContainerID string
+
 type ContainerConfig struct {
-	ID       string
+	ID       ContainerID
 	Name     string
 	Hostname string
 	Image    string
@@ -45,18 +47,18 @@ type ContainerConfig struct {
 		Name string
 	}
 	Volumes       []string
-	RestartPolicy string
+	RestartPolicy RestartPolicy
 	State         ContainerState
 	Cmd           []string
 }
 
-func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, error) {
+func (c Client) Containers(ctx context.Context) (map[ContainerID]ContainerConfig, error) {
 	containers, err := c.client.ContainerList(ctx, types.ContainerListOptions{}) //nolint:exhaustruct // no options
 	if err != nil {
 		return nil, fmt.Errorf("list containers: %w", err)
 	}
 
-	res := make(map[string]ContainerConfig, len(containers))
+	res := make(map[ContainerID]ContainerConfig, len(containers))
 
 	for _, container := range containers {
 		details, errInspect := c.client.ContainerInspect(ctx, container.ID)
@@ -82,15 +84,30 @@ func (c Client) Containers(ctx context.Context) (map[string]ContainerConfig, err
 			return nil, fmt.Errorf("unknown container state: %s", details.State.Status)
 		}
 
-		res[container.ID] = ContainerConfig{
-			ID:       container.ID,
+		var restartPolicy RestartPolicy
+		switch details.HostConfig.RestartPolicy.Name {
+		case "no":
+			restartPolicy = RestartPolicyNo
+		case "on-failure":
+			restartPolicy = RestartPolicyOnFailure
+		case "unless-stopped":
+			restartPolicy = RestartPolicyUnlessStopped
+		case "always":
+			restartPolicy = RestartPolicyAlways
+		default:
+			return nil, fmt.Errorf("unknown restart policy: %s", details.HostConfig.RestartPolicy.Name)
+		}
+
+		containerID := ContainerID(container.ID)
+		res[containerID] = ContainerConfig{
+			ID:       containerID,
 			Name:     details.Name,
 			Hostname: details.Config.Hostname,
-			// TODO: store label instaed?
+			// TODO: store label instead?
 			Image:         details.Image, // TODO: image hash
 			Networks:      nil,           // TODO: fill
 			Volumes:       fun.Keys(details.Config.Volumes),
-			RestartPolicy: details.HostConfig.RestartPolicy.Name,
+			RestartPolicy: restartPolicy,
 			State:         state,
 			Cmd:           details.Config.Cmd,
 		}
@@ -108,6 +125,15 @@ const (
 	ContainerDesiredStateStopped                              // container must exist and be stopped
 )
 
+type RestartPolicy int
+
+const (
+	RestartPolicyNo = iota
+	RestartPolicyOnFailure
+	RestartPolicyUnlessStopped
+	RestartPolicyAlways
+)
+
 type ContainerPolicy struct {
 	Name     string
 	Hostname fun.Option[string]
@@ -116,7 +142,7 @@ type ContainerPolicy struct {
 		Name string
 	}
 	Volumes       []string
-	RestartPolicy fun.Option[string]
+	RestartPolicy fun.Option[RestartPolicy]
 	State         ContainerDesiredState
 	Cmd           fun.Option[[]string]
 }
@@ -160,62 +186,78 @@ func needsRecreate(container ContainerConfig, policy ContainerPolicy) bool {
 		(policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd))
 }
 
-func (c Client) ContainerStart(ctx context.Context, container ContainerConfig) error {
+func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
 	return c.client.ContainerStart( //nolint:wrapcheck // lazy
 		ctx,
-		container.ID,
+		string(containerID),
 		types.ContainerStartOptions{
 			CheckpointID:  "",
 			CheckpointDir: "",
 		})
 }
 
-func (c Client) ContainerCreate(ctx context.Context, cfg ContainerConfig) error {
-	_, err := c.client.ContainerCreate(
+func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (ContainerID, error) {
+	var restartPolicy container.RestartPolicy
+	if policy.RestartPolicy.Valid() {
+		switch policy.RestartPolicy.Unwrap() {
+		case RestartPolicyAlways:
+			restartPolicy.Name = "always"
+		case RestartPolicyOnFailure:
+			restartPolicy.Name = "on-failure"
+		case RestartPolicyUnlessStopped:
+			restartPolicy.Name = "unless-stopped"
+		default:
+			return "", fmt.Errorf("unknown restart policy in container policy: %v", policy.RestartPolicy.Unwrap())
+		}
+	}
+
+	container, errCreate := c.client.ContainerCreate(
 		ctx,
 		&container.Config{ //nolint:exhaustruct // not all options are needed
-			Hostname: cfg.Hostname,
-			Image:    cfg.Image,
-			Volumes: fun.ToMap(cfg.Volumes, func(volume string) (string, struct{}) {
+			Hostname: policy.Hostname.OrDefault(""),
+			Image:    policy.Image,
+			Volumes: fun.ToMap(policy.Volumes, func(volume string) (string, struct{}) {
 				return volume, struct{}{}
 			}),
-			Cmd:          cfg.Cmd,
-			Env:          []string{},    // TODO: fill from cfg
-			ExposedPorts: nat.PortSet{}, // TODO: fill from cfg
+			Cmd:          policy.Cmd.OrDefault(nil),
+			Env:          []string{},    // TODO: fill from arg
+			ExposedPorts: nat.PortSet{}, // TODO: fill from arg
 		},
 		&container.HostConfig{ //nolint:exhaustruct // not all options are needed
-			RestartPolicy: container.RestartPolicy{
-				Name:              cfg.RestartPolicy, // TODO: remap?
-				MaximumRetryCount: 0,
-			},
+			RestartPolicy: restartPolicy,
 		},
 		nil, // TODO: fill networks from cfg
 		nil,
-		cfg.Name,
+		policy.Name,
 	)
-	return err //nolint:wrapcheck // lazy
+	if errCreate != nil {
+		return "", fmt.Errorf("create container: %w", errCreate)
+	}
+
+	return ContainerID(container.ID), nil
 }
 
-func (c Client) ContainerRun(ctx context.Context, container ContainerConfig) error {
-	if errCreate := c.ContainerCreate(ctx, container); errCreate != nil {
+func (c Client) ContainerRun(ctx context.Context, policy ContainerPolicy) error {
+	containerID, errCreate := c.ContainerCreate(ctx, policy)
+	if errCreate != nil {
 		return fmt.Errorf("run, create container: %w", errCreate)
 	}
 
-	if errStart := c.ContainerStart(ctx, container); errStart != nil {
+	if errStart := c.ContainerStart(ctx, containerID); errStart != nil {
 		return fmt.Errorf("run, start container: %w", errStart)
 	}
 
 	return nil
 }
 
-func (c Client) ContainerStop(ctx context.Context, container ContainerConfig) error {
-	return c.client.ContainerStop(ctx, container.ID, nil) //nolint:wrapcheck // lazy
+func (c Client) ContainerStop(ctx context.Context, containerID ContainerID) error {
+	return c.client.ContainerStop(ctx, string(containerID), nil) //nolint:wrapcheck // lazy
 }
 
-func (c Client) ContainerRemove(ctx context.Context, container ContainerConfig) error {
+func (c Client) ContainerRemove(ctx context.Context, containerID ContainerID) error {
 	return c.client.ContainerRemove( //nolint:wrapcheck // lazy
 		ctx,
-		container.ID,
+		string(containerID),
 		types.ContainerRemoveOptions{
 			RemoveVolumes: true,
 			Force:         false,
@@ -225,20 +267,31 @@ func (c Client) ContainerRemove(ctx context.Context, container ContainerConfig) 
 
 // TODO: use
 
-func (c Client) ContainerRestart(ctx context.Context, container ContainerConfig) error {
+func (c Client) ContainerRestart(ctx context.Context, containerID ContainerID) error {
 	// TODO: do in one docker client call
-	if errStop := c.ContainerStop(ctx, container); errStop != nil {
-		return fmt.Errorf("restart container %#v, stopping: %w", container, errStop)
+	if errStop := c.ContainerStop(ctx, containerID); errStop != nil {
+		return fmt.Errorf("restart container, stopping: %w", errStop)
 	}
 
-	if errStart := c.ContainerStart(ctx, container); errStart != nil {
-		return fmt.Errorf("restart container %#v, starting: %w", container, errStart)
+	if errStart := c.ContainerStart(ctx, containerID); errStart != nil {
+		// TODO: add container info to errors
+		return fmt.Errorf("restart container, starting: %w", errStart)
 	}
 
 	return nil
 }
 
-func Reconciliate(ctx context.Context, client Client, container ContainerConfig, policy ContainerPolicy) error {
+func Reconciliate(
+	ctx context.Context,
+	client Client,
+	policy ContainerPolicy,
+	containerMaybe fun.Option[ContainerConfig],
+) error {
+	if !containerMaybe.Valid() {
+		return client.ContainerRun(ctx, policy)
+	}
+
+	container := containerMaybe.Unwrap()
 	if needsRecreate(container, policy) {
 		// TODO: if remove stops container, it doesn't need to be stopped beforehand
 		return nil // TODO: recreate = stop, remove, run
@@ -250,9 +303,9 @@ func Reconciliate(ctx context.Context, client Client, container ContainerConfig,
 		case ContainerStateRunning, ContainerStateRestarting:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			return client.ContainerStart(ctx, container)
+			return client.ContainerStart(ctx, container.ID)
 		case ContainerStateRemoving:
-			return client.ContainerRun(ctx, container)
+			return client.ContainerRun(ctx, policy)
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to start from dead state")
 		default:
@@ -263,9 +316,9 @@ func Reconciliate(ctx context.Context, client Client, container ContainerConfig,
 		case ContainerStateRemoving:
 			return nil
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateExited:
-			return client.ContainerRemove(ctx, container)
+			return client.ContainerRemove(ctx, container.ID)
 		case ContainerStateRunning, ContainerStateRestarting:
-			return client.ContainerRemove(ctx, container)
+			return client.ContainerRemove(ctx, container.ID)
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to remove from dead state")
 		default:
@@ -279,7 +332,8 @@ func Reconciliate(ctx context.Context, client Client, container ContainerConfig,
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to become present from dead state")
 		case ContainerStateRemoving:
-			return client.ContainerCreate(ctx, container)
+			_, errCreate := client.ContainerCreate(ctx, policy)
+			return errCreate
 		default:
 			return fmt.Errorf("don't know how to become present from state %v", container.State)
 		}
@@ -288,7 +342,7 @@ func Reconciliate(ctx context.Context, client Client, container ContainerConfig,
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateRemoving, ContainerStateExited:
 			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
-			return client.ContainerStop(ctx, container)
+			return client.ContainerStop(ctx, container.ID)
 		case ContainerStateDead:
 			return fmt.Errorf("don't know how to stop from dead state")
 		default:
@@ -297,4 +351,26 @@ func Reconciliate(ctx context.Context, client Client, container ContainerConfig,
 	default:
 		return fmt.Errorf("unknown container desired state: %v", policy.State)
 	}
+}
+
+type PolicyMatch struct {
+	Policy    ContainerPolicy
+	Container fun.Option[ContainerConfig]
+}
+
+func MatchPolicies(containers map[string]ContainerConfig, policies []ContainerPolicy) []PolicyMatch {
+	containersByName := make(map[string]ContainerConfig, len(containers))
+	for _, container := range containers {
+		containersByName[container.Name] = container
+	}
+
+	res := make([]PolicyMatch, len(policies))
+	for i, policy := range policies {
+		container, ok := containersByName[policy.Name]
+		res[i] = PolicyMatch{
+			Policy:    policy,
+			Container: fun.Optional(container, ok),
+		}
+	}
+	return res
 }
