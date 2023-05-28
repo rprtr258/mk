@@ -87,17 +87,18 @@ func (conn SSHConnection) Run(cmd string) ( //nolint:nonamedreturns // too many 
 	stdout, stderr []byte,
 	err error,
 ) {
-	session, err := conn.client.NewSession()
+	// TODO: use context like here https://github.com/umputun/spot/blob/master/pkg/executor/remote.go#L239
+	sess, err := conn.client.NewSession()
 	if err != nil {
 		return nil, nil, fmt.Errorf("new session: %w", err)
 	}
-	defer session.Close()
+	defer sess.Close()
 
 	var outB, errB bytes.Buffer
-	session.Stdout = &outB
-	session.Stderr = &errB
+	sess.Stdout, sess.Stderr = &outB, &errB
 	conn.l.Debugf("executing command remotely", log.F{"command": cmd})
-	errCmd := session.Run(cmd)
+	errCmd := sess.Run(cmd)
+	// TODO: multiwrite to stdout
 	conn.l.Debugf("command finished", log.F{
 		"command": cmd,
 		"stdout":  outB.String(),
