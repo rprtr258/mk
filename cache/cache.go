@@ -2,6 +2,7 @@ package cache
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,11 +98,11 @@ func HashFile(filename string) (string, error) {
 	defer f.Close()
 
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("sha256 hashing: %w", err)
+	if _, errCopy := io.Copy(h, f); errCopy != nil {
+		return "", fmt.Errorf("sha256 hashing: %w", errCopy)
 	}
 
-	return fmt.Sprintf("%x", h.Sum(nil)), nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // HashDir / HashGlob

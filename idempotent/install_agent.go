@@ -3,8 +3,6 @@ package idempotent
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +15,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
+	"github.com/rprtr258/mk/cache"
 	"go.uber.org/multierr"
 	"golang.org/x/crypto/ssh"
 
@@ -146,21 +145,6 @@ func getRemoteAgentHash(
 	return string(stdout[:64]), nil
 }
 
-// TODO: return bytes
-func getBinaryHash(path string) (string, error) {
-	agentFileBytes, errRead := os.ReadFile(path)
-	if errRead != nil {
-		return "", fmt.Errorf("read agent binary for hashing: %w", errRead)
-	}
-
-	hasher := sha256.New()
-	if _, errHash := io.Copy(hasher, bytes.NewReader(agentFileBytes)); errHash != nil {
-		return "", fmt.Errorf("hash agent binary: %w", errHash)
-	}
-
-	return hex.EncodeToString(hasher.Sum(nil)), nil
-}
-
 func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
 	cwd, errCwd := os.Getwd()
 	if errCwd != nil {
@@ -212,7 +196,7 @@ func remoteNeedsToBeUpdated(ctx context.Context, conn SSHConnection) (bool, erro
 	}
 
 	// TODO: get remote in prod, local in dev
-	localHash, errLocalHash := getBinaryHash(filepath.Join(cwd, _agentExecutable))
+	localHash, errLocalHash := cache.HashFile(filepath.Join(cwd, _agentExecutable))
 	if errLocalHash != nil {
 		return false, fmt.Errorf("get local agent binary hash: %w", errLocalHash)
 	}
