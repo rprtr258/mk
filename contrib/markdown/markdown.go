@@ -16,11 +16,11 @@ func H1(w io.Writer, text string) {
 }
 
 func H2(w io.Writer, text string) {
-	Header(w, 2, text)
+	Header(w, 2, text) //nolint:gomnd // H2
 }
 
 func H3(w io.Writer, text string) {
-	Header(w, 3, text)
+	Header(w, 3, text) //nolint:gomnd // H3
 }
 
 func Code(w io.Writer, lang, code string) {
