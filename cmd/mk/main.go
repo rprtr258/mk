@@ -12,6 +12,7 @@ import (
 	"github.com/rprtr258/mk"
 	"github.com/rprtr258/mk/contrib/docker"
 	"github.com/rprtr258/mk/idempotent"
+	"github.com/rprtr258/mk/ssh"
 	"github.com/urfave/cli/v2"
 )
 
@@ -26,7 +27,7 @@ func readFile(filename string) []byte {
 }
 
 // TODO: for local runs don't use agent
-func listContainers(ctx context.Context, conn idempotent.SSHConnection) (map[string]docker.ContainerConfig, error) {
+func listContainers(ctx context.Context, conn ssh.Connection) (map[string]docker.ContainerConfig, error) {
 	return idempotent.AgentQuery[map[string]docker.ContainerConfig](
 		ctx,
 		conn,
@@ -35,7 +36,7 @@ func listContainers(ctx context.Context, conn idempotent.SSHConnection) (map[str
 }
 
 // TODO: for local runs don't use agent
-func reconcileContainer(ctx context.Context, conn idempotent.SSHConnection, policies []docker.ContainerPolicy) error {
+func reconcileContainer(ctx context.Context, conn ssh.Connection, policies []docker.ContainerPolicy) error {
 	return idempotent.AgentCommand( //nolint:wrapcheck // pohuy
 		ctx,
 		conn,
@@ -99,7 +100,7 @@ func main() { //nolint:funlen // pohuy
 				Name:  "test-agent",
 				Usage: "Test agent upload",
 				Action: func(ctx *cli.Context) error {
-					conn, errSSH := idempotent.NewSSHConnection("rprtr258", "rus", _privateKey)
+					conn, errSSH := ssh.NewConnection("rprtr258", "rus", _privateKey)
 					if errSSH != nil {
 						return fmt.Errorf("new ssh connection: %w", errSSH)
 					}
@@ -122,7 +123,7 @@ func main() { //nolint:funlen // pohuy
 				Name:  "test-reconcile",
 				Usage: "Test container reconcile",
 				Action: func(ctx *cli.Context) error {
-					conn, errSSH := idempotent.NewSSHConnection("rprtr258", "rus", _privateKey)
+					conn, errSSH := ssh.NewConnection("rprtr258", "rus", _privateKey)
 					if errSSH != nil {
 						return fmt.Errorf("new ssh connection: %w", errSSH)
 					}

@@ -90,6 +90,7 @@ func Save[K comparable, V any](w io.Writer, cache Cache[K, V]) {
 	}
 }
 
+// TODO: move out?
 func HashFile(filename string) (string, error) {
 	f, err := os.Open(filename)
 	if err != nil {

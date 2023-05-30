@@ -1,136 +1,35 @@
 package idempotent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/sftp"
 	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
-	"github.com/rprtr258/mk/cache"
-	"go.uber.org/multierr"
-	"golang.org/x/crypto/ssh"
 
 	"github.com/rprtr258/mk"
+	"github.com/rprtr258/mk/cache"
+	"github.com/rprtr258/mk/ssh"
 )
 
 const (
 	_agentExecutable = "mk-agent"
-	_agentVersion    = "v0.0.0" // TODO: make build time
 )
-
-type SSHConnection struct {
-	client *ssh.Client
-	sftp   *sftp.Client
-
-	user string
-	host string
-
-	l log.Logger
-}
-
-func NewSSHConnection(user, host string, privateKey []byte) (SSHConnection, error) {
-	key, err := ssh.ParsePrivateKey(privateKey)
-	if err != nil {
-		return SSHConnection{}, fmt.Errorf("parse private key: %w", err)
-	}
-
-	client, err := ssh.Dial(
-		"tcp",
-		net.JoinHostPort(host, "22"),
-		&ssh.ClientConfig{ //nolint:exhaustruct // daaaaaa
-			User:            user,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // host key ignored
-			Auth: []ssh.AuthMethod{
-				ssh.PublicKeys(key),
-			},
-		},
-	)
-	if err != nil {
-		return SSHConnection{}, fmt.Errorf("connect to ssh server user=%q host=%q: %w", user, host, err)
-	}
-
-	sftp, err := sftp.NewClient(client)
-	if err != nil {
-		return SSHConnection{}, fmt.Errorf("new sftp client: %w", err)
-	}
-
-	return SSHConnection{
-		client: client,
-		sftp:   sftp,
-		user:   user,
-		host:   host,
-		l:      log.Tag("ssh").With(log.F{"user": user, "host": host}),
-	}, nil
-}
-
-func (conn SSHConnection) Close() error {
-	var merr error
-	if errSFTP := conn.sftp.Close(); errSFTP != nil {
-		multierr.AppendInto(&merr, fmt.Errorf("close sftp client: %w", errSFTP))
-	}
-	if errSSH := conn.client.Close(); errSSH != nil {
-		multierr.AppendInto(&merr, fmt.Errorf("close ssh client: %w", errSSH))
-	}
-	return merr
-}
-
-func (conn SSHConnection) Run(cmd string) ( //nolint:nonamedreturns // too many returns
-	stdout, stderr []byte,
-	err error,
-) {
-	// TODO: use context like here https://github.com/umputun/spot/blob/master/pkg/executor/remote.go#L239
-	sess, err := conn.client.NewSession()
-	if err != nil {
-		return nil, nil, fmt.Errorf("new session: %w", err)
-	}
-	defer sess.Close()
-
-	var outB, errB bytes.Buffer
-	sess.Stdout, sess.Stderr = &outB, &errB
-	conn.l.Debugf("executing command remotely", log.F{"command": cmd})
-	errCmd := sess.Run(cmd)
-	// TODO: multiwrite to stdout
-	conn.l.Debugf("command finished", log.F{
-		"command": cmd,
-		"stdout":  outB.String(),
-		"stderr":  errB.String(),
-	})
-	return outB.Bytes(), errB.Bytes(), errCmd
-}
-
-func (conn SSHConnection) Upload(r io.Reader, remotePath string, mode os.FileMode) error {
-	dstFile, err := conn.sftp.Create(remotePath)
-	if err != nil {
-		return fmt.Errorf("create remote file %q: %w", remotePath, err)
-	}
-	defer dstFile.Close()
-
-	if errChmod := dstFile.Chmod(mode); errChmod != nil {
-		return fmt.Errorf("chmod path=%q mode=%v: %w", remotePath, mode, errChmod)
-	}
-
-	conn.l.Debugf("uploading file", log.F{"remotePath": remotePath})
-	if _, errUpload := dstFile.ReadFrom(r); errUpload != nil {
-		return fmt.Errorf("write to remote file %q: %w", remotePath, errUpload)
-	}
-
-	return nil
-}
 
 func getRemoteAgentHash(
 	_ context.Context,
-	conn SSHConnection,
+	conn ssh.Connection,
 ) (string, error) {
-	l := conn.l.Tag("checkAgentInstalled")
+	l := log.With(log.F{
+		"host": conn.Host(),
+		"user": conn.User(),
+	}).Tag("getRemoteAgentHash")
 
 	// TODO: behold not having sha256sum on remote
 	stdout, stderr, errAgentVersion := conn.Run("sha256sum mk-agent")
@@ -180,7 +79,7 @@ func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
 	return agentFile, nil
 }
 
-func remoteNeedsToBeUpdated(ctx context.Context, conn SSHConnection) (bool, error) {
+func remoteNeedsToBeUpdated(ctx context.Context, conn ssh.Connection) (bool, error) {
 	remoteHash, errLocalHash := getRemoteAgentHash(ctx, conn)
 	if errLocalHash != nil {
 		return false, errLocalHash
@@ -209,7 +108,7 @@ func remoteNeedsToBeUpdated(ctx context.Context, conn SSHConnection) (bool, erro
 	return remoteHash != localHash, nil
 }
 
-func installAgent(ctx context.Context, conn SSHConnection) error {
+func installAgent(ctx context.Context, conn ssh.Connection) error {
 	// TODO: cache
 	needToUpdate, errCheck := remoteNeedsToBeUpdated(ctx, conn)
 	if errCheck != nil {
@@ -239,7 +138,7 @@ func installAgent(ctx context.Context, conn SSHConnection) error {
 
 func AgentQuery[T any](
 	ctx context.Context,
-	conn SSHConnection,
+	conn ssh.Connection,
 	cmd []string,
 ) (T, error) {
 	if errInstall := installAgent(ctx, conn); errInstall != nil {
@@ -267,7 +166,7 @@ func AgentQuery[T any](
 
 func AgentCommand[T any](
 	ctx context.Context,
-	conn SSHConnection,
+	conn ssh.Connection,
 	cmd []string,
 	arg T,
 ) error {
