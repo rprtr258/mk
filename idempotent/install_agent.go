@@ -45,33 +45,36 @@ func getRemoteAgentHash(
 	return string(stdout[:64]), nil
 }
 
-func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
-	cwd, errCwd := os.Getwd()
-	if errCwd != nil {
-		return nil, fmt.Errorf("get cwd: %w", errCwd)
+func BuildAgentLocally(ctx context.Context) error {
+	if _, _, errBuild := mk.ExecContext(ctx,
+		"go", "build", "-o", _agentExecutable, filepath.Join("cmd", _agentExecutable, "main.go"),
+	); errBuild != nil {
+		return fmt.Errorf("go build %s: %w", _agentExecutable, errBuild)
 	}
 
 	if _, _, errBuild := mk.ExecContext(ctx,
-		"go", "build", filepath.Join(cwd, "cmd", _agentExecutable),
+		"strip", _agentExecutable,
 	); errBuild != nil {
+		return fmt.Errorf("strip %s: %w", _agentExecutable, errBuild)
+	}
+
+	if _, _, errBuild := mk.ExecContext(ctx,
+		"upx", _agentExecutable,
+		// TODO: on release
+		// "upx", "--best", "--ultra-brute", executableName,
+	); errBuild != nil {
+		return fmt.Errorf("upx %s: %w", _agentExecutable, errBuild)
+	}
+
+	return nil
+}
+
+func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
+	if errBuild := BuildAgentLocally(ctx); errBuild != nil {
 		return nil, fmt.Errorf("build agent: %w", errBuild)
 	}
 
-	agentBinaryPath := filepath.Join(cwd, _agentExecutable)
-
-	if _, _, errBuild := mk.ExecContext(ctx,
-		"strip", agentBinaryPath,
-	); errBuild != nil {
-		return nil, fmt.Errorf("strip agent binary: %w", errBuild)
-	}
-
-	if _, _, errBuild := mk.ExecContext(ctx,
-		"upx", agentBinaryPath,
-	); errBuild != nil {
-		return nil, fmt.Errorf("upx agent binary: %w", errBuild)
-	}
-
-	agentFile, errOpen := os.Open(agentBinaryPath)
+	agentFile, errOpen := os.Open(_agentExecutable)
 	if errOpen != nil {
 		return nil, fmt.Errorf("open agent binary: %w", errOpen)
 	}

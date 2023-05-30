@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/rprtr258/fun"
@@ -45,7 +44,7 @@ func reconcileContainer(ctx context.Context, conn ssh.Connection, policies []doc
 	)
 }
 
-func main() { //nolint:funlen // pohuy
+func main() {
 	if err := (&cli.App{ //nolint:exhaustruct // daaaaaa
 		Name:            "mk",
 		Usage:           "project commands runner",
@@ -68,27 +67,8 @@ func main() { //nolint:funlen // pohuy
 						Usage: "Compile mk-agent binary",
 						// TODO: watch bool flag
 						Action: func(ctx *cli.Context) error {
-							const executableName = "mk-agent"
-
-							if so, se, errBuild := mk.ExecContext(ctx.Context,
-								"go", "build", "-o", executableName, filepath.Join("cmd", executableName, "main.go"),
-							); errBuild != nil {
-								log.Infof("", log.F{"stdout": so, "stderr": se})
-								return fmt.Errorf("build agent: %w", errBuild)
-							}
-
-							if _, _, errBuild := mk.ExecContext(ctx.Context,
-								"strip", executableName,
-							); errBuild != nil {
-								return fmt.Errorf("strip agent binary: %w", errBuild)
-							}
-
-							if _, _, errBuild := mk.ExecContext(ctx.Context,
-								"upx", executableName,
-								// TODO: on release
-								// "upx", "--best", "--ultra-brute", executableName,
-							); errBuild != nil {
-								return fmt.Errorf("upx agent binary: %w", errBuild)
+							if err := idempotent.BuildAgentLocally(ctx.Context); err != nil {
+								return fmt.Errorf("build agent: %w", err)
 							}
 
 							return nil
