@@ -139,7 +139,8 @@ func installAgent(ctx context.Context, conn ssh.Connection) error {
 	return nil
 }
 
-func AgentQuery[T any](
+// Query - low-level interface to run agent command and get result as T
+func Query[T any](
 	ctx context.Context,
 	conn ssh.Connection,
 	cmd []string,
@@ -167,7 +168,8 @@ func AgentQuery[T any](
 	return result, nil
 }
 
-func AgentCommand[T any](
+// Query - low-level interface to run agent command
+func Execute[T any](
 	ctx context.Context,
 	conn ssh.Connection,
 	cmd []string,

@@ -28,7 +28,7 @@ func readFile(filename string) []byte {
 
 // TODO: for local runs don't use agent
 func listContainers(ctx context.Context, conn ssh.Connection) (map[string]docker.ContainerConfig, error) {
-	return agent.AgentQuery[map[string]docker.ContainerConfig](
+	return agent.Query[map[string]docker.ContainerConfig](
 		ctx,
 		conn,
 		[]string{"docker", "container", "ls"}, // TODO: bind with agent declaration
@@ -37,7 +37,7 @@ func listContainers(ctx context.Context, conn ssh.Connection) (map[string]docker
 
 // TODO: for local runs don't use agent
 func reconcileContainer(ctx context.Context, conn ssh.Connection, policies []docker.ContainerPolicy) error {
-	return agent.AgentCommand( //nolint:wrapcheck // pohuy
+	return agent.Execute( //nolint:wrapcheck // pohuy
 		ctx,
 		conn,
 		[]string{"docker", "container", "reconcile"}, // TODO: bind with agent declaration
