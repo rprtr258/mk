@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -69,7 +70,7 @@ func (conn Connection) Close() error {
 	return merr
 }
 
-func (conn Connection) Run(cmd string) ( //nolint:nonamedreturns // too many returns
+func (conn Connection) Run(ctx context.Context, cmd string) ( //nolint:nonamedreturns // too many returns
 	stdout, stderr []byte,
 	err error,
 ) {
@@ -81,16 +82,48 @@ func (conn Connection) Run(cmd string) ( //nolint:nonamedreturns // too many ret
 	defer sess.Close()
 
 	var outB, errB bytes.Buffer
+	// mwr := io.MultiWriter(os.Stdout, &outB) // TODO: fix, prefix writing to stdout
 	sess.Stdout, sess.Stderr = &outB, &errB
-	conn.l.Debugf("executing command remotely", log.F{"command": cmd})
-	errCmd := sess.Run(cmd)
-	// TODO: multiwrite to stdout
-	conn.l.Debugf("command finished", log.F{
-		"command": cmd,
-		"stdout":  outB.String(),
-		"stderr":  errB.String(),
-	})
-	return outB.Bytes(), errB.Bytes(), errCmd
+
+	type result struct {
+		stdout, stderr []byte
+		err            error
+	}
+	done := make(chan result)
+	go func() {
+		conn.l.Debugf("executing command remotely", log.F{"command": cmd})
+		errCmd := sess.Run(cmd)
+		if errCmd != nil {
+			conn.l.Debugf("command failed", log.F{
+				"command": cmd,
+				"stdout":  outB.String(),
+				"stderr":  errB.String(),
+				"error":   errCmd.Error(),
+			})
+		} else {
+			conn.l.Debugf("command finished", log.F{
+				"command": cmd,
+				"stdout":  outB.String(),
+				"stderr":  errB.String(),
+			})
+		}
+		done <- result{
+			stdout: outB.Bytes(),
+			stderr: errB.Bytes(),
+			err:    errCmd,
+		}
+	}()
+
+	var res result
+	select {
+	case res = <-done:
+		return res.stdout, res.stderr, res.err
+	case <-ctx.Done():
+		if errInterrupt := sess.Signal(ssh.SIGINT); errInterrupt != nil {
+			return nil, nil, fmt.Errorf("send interrupt: %w", errInterrupt)
+		}
+		return nil, nil, fmt.Errorf("canceled: %w", ctx.Err())
+	}
 }
 
 func (conn Connection) Upload(r io.Reader, remotePath string, mode os.FileMode) error {

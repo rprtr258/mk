@@ -39,7 +39,7 @@ func Query[T any](
 	}
 
 	// TODO: gzip args, validate args length, chunk args
-	stdout, stderr, errRun := agent.conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
+	stdout, stderr, errRun := agent.conn.Run(ctx, strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
 	if errRun != nil {
 		return fun.Zero[T](), fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
 	}
@@ -78,7 +78,7 @@ func Execute[T any](
 		return errInstall
 	}
 
-	stdout, stderr, errRun := agent.conn.Run(fullCmd)
+	stdout, stderr, errRun := agent.conn.Run(ctx, fullCmd)
 	if errRun != nil {
 		return fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
 	}

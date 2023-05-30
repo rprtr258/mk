@@ -20,7 +20,7 @@ const (
 )
 
 func getRemoteAgentHash(
-	_ context.Context,
+	ctx context.Context,
 	conn ssh.Connection,
 ) (string, error) {
 	l := log.With(log.F{
@@ -29,7 +29,7 @@ func getRemoteAgentHash(
 	}).Tag("getRemoteAgentHash")
 
 	// TODO: behold not having sha256sum on remote
-	stdout, stderr, errAgentVersion := conn.Run("sha256sum mk-agent")
+	stdout, stderr, errAgentVersion := conn.Run(ctx, "sha256sum mk-agent")
 	if errAgentVersion != nil {
 		if strings.Contains(string(stderr), "sha256sum: mk-agent: No such file or directory") {
 			l.Info("mk-agent is not installed remotely")
