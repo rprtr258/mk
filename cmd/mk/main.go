@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -24,25 +23,6 @@ func readFile(filename string) []byte {
 		log.Fatalf("read private key", log.F{"filename": filename, "err": errKey})
 	}
 	return res
-}
-
-// TODO: for local runs don't use agent
-func listContainers(ctx context.Context, conn ssh.Connection) (map[string]docker.ContainerConfig, error) {
-	return agent.Query[map[string]docker.ContainerConfig](
-		ctx,
-		conn,
-		[]string{"docker", "container", "ls"}, // TODO: bind with agent declaration
-	)
-}
-
-// TODO: for local runs don't use agent
-func reconcileContainer(ctx context.Context, conn ssh.Connection, policies []docker.ContainerPolicy) error {
-	return agent.Execute( //nolint:wrapcheck // pohuy
-		ctx,
-		conn,
-		[]string{"docker", "container", "reconcile"}, // TODO: bind with agent declaration
-		policies,
-	)
 }
 
 func main() {
@@ -87,7 +67,12 @@ func main() {
 					}
 					defer conn.Close()
 
-					containers, errListContainers := listContainers(ctx.Context, conn)
+					agent, errNewAgent := agent.New(ctx.Context, conn)
+					if errNewAgent != nil {
+						return fmt.Errorf("new agent: %w", errNewAgent)
+					}
+
+					containers, errListContainers := agent.ListContainers(ctx.Context)
 					if errListContainers != nil {
 						return fmt.Errorf("list containers: %w", errListContainers)
 					}
@@ -110,6 +95,11 @@ func main() {
 					}
 					defer conn.Close()
 
+					agent, errNewAgent := agent.New(ctx.Context, conn)
+					if errNewAgent != nil {
+						return fmt.Errorf("new agent: %w", errNewAgent)
+					}
+
 					policies := []docker.ContainerPolicy{
 						// TODO: get from args
 						{
@@ -124,7 +114,7 @@ func main() {
 						},
 					}
 
-					if errReconcile := reconcileContainer(ctx.Context, conn, policies); errReconcile != nil {
+					if errReconcile := agent.ReconcileContainer(ctx.Context, policies); errReconcile != nil {
 						return fmt.Errorf("reconcile: %w", errReconcile)
 					}
 

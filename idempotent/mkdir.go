@@ -31,7 +31,7 @@ type MkdirOptions struct {
 	Perm fs.FileMode
 }
 
-func NewMkdir(opts MkdirOptions) Action[Sentinel] {
+func NewMkdir(opts MkdirOptions) Action {
 	perm := fun.If(opts.Perm != 0, opts.Perm, DefaultDirPerm)
 
 	return &mkdir{
@@ -74,12 +74,11 @@ func (a *mkdir) IsCompleted() (bool, error) {
 	}
 
 	return a.inspection.exists &&
-			a.inspection.isDir &&
-			a.inspection.arePermSame,
-		nil
+		a.inspection.isDir &&
+		a.inspection.arePermSame, nil
 }
 
-func (a *mkdir) perform(context.Context) error {
+func (a *mkdir) Run(ctx context.Context) error {
 	if err := a.inspect(); err != nil {
 		return err
 	}
@@ -100,8 +99,4 @@ func (a *mkdir) perform(context.Context) error {
 	}
 
 	return nil
-}
-
-func (a *mkdir) Perform(ctx context.Context) (Sentinel, error) {
-	return Sentinel{}, a.perform(ctx)
 }

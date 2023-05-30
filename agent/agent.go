@@ -2,15 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
-	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
 
 	"github.com/rprtr258/mk"
@@ -134,68 +131,6 @@ func installAgent(ctx context.Context, conn ssh.Connection) error {
 	const agentFilePerms = 0o700
 	if errUpload := conn.Upload(agentFile, remoteAgentBinaryPath, agentFilePerms); errUpload != nil {
 		return fmt.Errorf("upload agent binary: %w", errUpload)
-	}
-
-	return nil
-}
-
-// Query - low-level interface to run agent command and get result as T
-func Query[T any](
-	ctx context.Context,
-	conn ssh.Connection,
-	cmd []string,
-) (T, error) {
-	if errInstall := installAgent(ctx, conn); errInstall != nil {
-		return fun.Zero[T](), errInstall
-	}
-
-	// TODO: gzip args, validate args length, chunk args
-	stdout, stderr, errRun := conn.Run(strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
-	if errRun != nil {
-		return fun.Zero[T](), fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
-	}
-
-	var result T
-	if errUnmarshal := json.Unmarshal(stdout, &result); errUnmarshal != nil {
-		return fun.Zero[T](), fmt.Errorf(
-			"json unmarshal call result, cmd=%v, stdout=%q: %w",
-			cmd,
-			string(stdout),
-			errUnmarshal,
-		)
-	}
-
-	return result, nil
-}
-
-// Query - low-level interface to run agent command
-func Execute[T any](
-	ctx context.Context,
-	conn ssh.Connection,
-	cmd []string,
-	arg T,
-) error {
-	argBytes, errMarshal := json.Marshal(arg)
-	if errMarshal != nil {
-		return fmt.Errorf("json marshal arg=%+v: %w", arg, errMarshal)
-	}
-
-	args := append([]string{"./mk-agent"}, cmd...)
-	// TODO: gzip args, validate args length, chunk args
-	args = append(args, strconv.Quote(string(argBytes)))
-	fullCmd := strings.Join(args, " ")
-
-	if errInstall := installAgent(ctx, conn); errInstall != nil {
-		return errInstall
-	}
-
-	stdout, stderr, errRun := conn.Run(fullCmd)
-	if errRun != nil {
-		return fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
-	}
-
-	if len(stdout) != 0 {
-		log.Infof(string(stdout), log.F{"cmd": cmd})
 	}
 
 	return nil

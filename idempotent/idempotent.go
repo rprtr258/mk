@@ -8,37 +8,17 @@ import (
 	"go.uber.org/multierr"
 )
 
-// Sentinel result for actions that have nothing to return.
-type Sentinel struct{}
-
 // Action represents action that can be retried several times.
 // If action was alreadey completed, there is no need to run it again.
-type Action[T any] interface {
+type Action interface {
 	// IsCompleted - check whether action need to be run.
 	IsCompleted() (bool, error)
-	// Perform action and return some result. After success, IsCompleted must return true.
-	Perform(context.Context) (T, error)
+	// Run action. After success, IsCompleted must return true.
+	Run(context.Context) error
 }
 
-type sentinelAction[T any] struct {
-	action Action[T]
-}
-
-func (a sentinelAction[T]) IsCompleted() (bool, error) {
-	return a.action.IsCompleted() //nolint:wrapcheck // return original error
-}
-
-func (a sentinelAction[T]) Perform(ctx context.Context) (Sentinel, error) {
-	_, err := a.action.Perform(ctx)
-	return Sentinel{}, err //nolint:wrapcheck // return original error
-}
-
-func RemoveResult[T any](action Action[T]) Action[Sentinel] {
-	return sentinelAction[T]{action: action}
-}
-
-// Perform single action. If it is already completed, no action is performed.
-func Perform(ctx context.Context, action Action[Sentinel]) error {
+// Run single action. If it is already completed, no action is performed.
+func Run(ctx context.Context, action Action) error {
 	completed, errCompleted := action.IsCompleted()
 	if errCompleted != nil {
 		return fmt.Errorf("check isCompleted: %w", errCompleted)
@@ -48,14 +28,13 @@ func Perform(ctx context.Context, action Action[Sentinel]) error {
 		return nil
 	}
 
-	_, err := action.Perform(ctx)
-	return err //nolint:wrapcheck // return original error
+	return action.Run(ctx) //nolint:wrapcheck // return original error
 }
 
 // Multistep - perform idempotent actions by given order.
-func Multistep(ctx context.Context, actions ...Action[Sentinel]) error {
+func Multistep(ctx context.Context, actions ...Action) error {
 	for i, action := range actions {
-		if err := Perform(ctx, action); err != nil {
+		if err := Run(ctx, action); err != nil {
 			return fmt.Errorf("action #%d: %w", i, err)
 		}
 	}
@@ -63,7 +42,7 @@ func Multistep(ctx context.Context, actions ...Action[Sentinel]) error {
 	return nil
 }
 
-func Parallel(ctx context.Context, actions ...Action[Sentinel]) error {
+func Parallel(ctx context.Context, actions ...Action) error {
 	errch := make(chan error)
 	errs := []error{}
 
@@ -76,7 +55,7 @@ func Parallel(ctx context.Context, actions ...Action[Sentinel]) error {
 	for _, action := range actions {
 		action := action
 		wg.Go(func() {
-			if err := Perform(ctx, action); err != nil {
+			if err := Run(ctx, action); err != nil {
 				errch <- err
 			}
 		})
