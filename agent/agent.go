@@ -1,4 +1,4 @@
-package idempotent
+package agent
 
 import (
 	"context"
@@ -45,7 +45,7 @@ func getRemoteAgentHash(
 	return string(stdout[:64]), nil
 }
 
-func BuildAgentLocally(ctx context.Context) error {
+func BuildLocally(ctx context.Context) error {
 	if _, _, errBuild := mk.ExecContext(ctx,
 		"go", "build", "-o", _agentExecutable, filepath.Join("cmd", _agentExecutable, "main.go"),
 	); errBuild != nil {
@@ -70,7 +70,7 @@ func BuildAgentLocally(ctx context.Context) error {
 }
 
 func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
-	if errBuild := BuildAgentLocally(ctx); errBuild != nil {
+	if errBuild := BuildLocally(ctx); errBuild != nil {
 		return nil, fmt.Errorf("build agent: %w", errBuild)
 	}
 

@@ -8,11 +8,12 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
-	"github.com/rprtr258/mk"
-	"github.com/rprtr258/mk/contrib/docker"
-	"github.com/rprtr258/mk/idempotent"
-	"github.com/rprtr258/mk/ssh"
 	"github.com/urfave/cli/v2"
+
+	"github.com/rprtr258/mk"
+	"github.com/rprtr258/mk/agent"
+	"github.com/rprtr258/mk/contrib/docker"
+	"github.com/rprtr258/mk/ssh"
 )
 
 var _privateKey = readFile("/home/rprtr258/.ssh/rus_rprtr258")
@@ -27,7 +28,7 @@ func readFile(filename string) []byte {
 
 // TODO: for local runs don't use agent
 func listContainers(ctx context.Context, conn ssh.Connection) (map[string]docker.ContainerConfig, error) {
-	return idempotent.AgentQuery[map[string]docker.ContainerConfig](
+	return agent.AgentQuery[map[string]docker.ContainerConfig](
 		ctx,
 		conn,
 		[]string{"docker", "container", "ls"}, // TODO: bind with agent declaration
@@ -36,7 +37,7 @@ func listContainers(ctx context.Context, conn ssh.Connection) (map[string]docker
 
 // TODO: for local runs don't use agent
 func reconcileContainer(ctx context.Context, conn ssh.Connection, policies []docker.ContainerPolicy) error {
-	return idempotent.AgentCommand( //nolint:wrapcheck // pohuy
+	return agent.AgentCommand( //nolint:wrapcheck // pohuy
 		ctx,
 		conn,
 		[]string{"docker", "container", "reconcile"}, // TODO: bind with agent declaration
@@ -67,7 +68,7 @@ func main() {
 						Usage: "Compile mk-agent binary",
 						// TODO: watch bool flag
 						Action: func(ctx *cli.Context) error {
-							if err := idempotent.BuildAgentLocally(ctx.Context); err != nil {
+							if err := agent.BuildLocally(ctx.Context); err != nil {
 								return fmt.Errorf("build agent: %w", err)
 							}
 
