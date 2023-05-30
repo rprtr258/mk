@@ -13,19 +13,19 @@ import (
 
 var _subcommandDocker = &cli.Command{ //nolint:exhaustruct // pohuy
 	Name:            "docker",
-	Usage:           "Get info about docker resources",
+	Usage:           "Manage docker resources",
 	HideHelpCommand: true,
 	HideHelp:        true,
 	Subcommands: []*cli.Command{
 		{
 			Name:            "container",
-			Usage:           "Get info about docker containers",
+			Usage:           "Manage docker containers",
 			HideHelpCommand: true,
 			HideHelp:        true,
 			Subcommands: []*cli.Command{
 				{
 					Name:            "ls",
-					Usage:           "List containers",
+					Usage:           "List available containers",
 					HideHelpCommand: true,
 					HideHelp:        true,
 					Action: func(ctx *cli.Context) error {

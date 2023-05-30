@@ -65,7 +65,6 @@ func ShellScript(ctx context.Context, script string) (stdout string, stderr stri
 }
 
 func MkDir(dir string, perms fs.FileMode) error { //nolint:revive // MkDir is named as mkdir bash command
-
 	if err := os.MkdirAll(dir, perms); err != nil {
 		return fmt.Errorf("mkdir %q with perms=%v: %w", dir, perms, err)
 	}
