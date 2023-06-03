@@ -297,7 +297,7 @@ func needsRecreate(
 	if policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd) {
 		difference["cmd"] = fmt.Sprintf("expected=%v actual=%v", policy.Cmd.Unwrap(), container.Cmd)
 	}
-	if !compareMaps(container.Env, policy.Env) {
+	if !compareMaps(container.Env, policy.Env) { // TODO: ignore PATH env if it is not specified explicitly
 		difference["env"] = fmt.Sprintf("expected=%v actual=%v", policy.Env, container.Env)
 	}
 	if !compareMapsOfSlices(container.PortBindings, policy.PortBindings) {
@@ -475,9 +475,9 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 			return fmt.Errorf("stop old container: %w", errStop)
 		}
 
-		// if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
-		// 	return fmt.Errorf("remove old container: %w", errRemove)
-		// }
+		if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
+			return fmt.Errorf("remove old container: %w", errRemove)
+		}
 
 		newContainerID, errCreate := client.ContainerCreate(ctx, policy)
 		if errCreate != nil {
