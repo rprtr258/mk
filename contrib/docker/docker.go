@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -51,6 +52,8 @@ type ContainerConfig struct {
 	RestartPolicy RestartPolicy
 	State         ContainerState
 	Cmd           []string
+	Env           map[string]string
+	PortBindings  map[nat.Port][]nat.PortBinding
 }
 
 func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerConfig, error) {
@@ -115,6 +118,20 @@ func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerCo
 			RestartPolicy: restartPolicy,
 			State:         state,
 			Cmd:           details.Config.Cmd,
+			Env: fun.ToMap(
+				details.Config.Env,
+				func(env string) (string, string) {
+					const _partsNumber = 2 // 2 parts: key=value
+
+					parts := strings.SplitN(env, "=", _partsNumber)
+					if len(parts) != _partsNumber {
+						return parts[0], ""
+					}
+
+					return parts[0], parts[1]
+				},
+			),
+			PortBindings: details.HostConfig.PortBindings,
 		}
 	}
 
@@ -150,6 +167,8 @@ type ContainerPolicy struct {
 	RestartPolicy fun.Option[RestartPolicy]
 	State         ContainerDesiredState
 	Cmd           fun.Option[[]string]
+	Env           map[string]string
+	PortBindings  map[nat.Port][]nat.PortBinding
 }
 
 func elementsMatch[T comparable](xs, ys []T) bool {
@@ -181,6 +200,41 @@ func compareLists[T comparable](xs, ys []T) bool {
 	return true
 }
 
+func compareMaps(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, v := range a {
+		if v != b[k] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func compareMapsOfSlices(a, b map[nat.Port][]nat.PortBinding) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, av := range a {
+		bv := b[k]
+		if len(av) != len(bv) {
+			return false
+		}
+
+		for i, avi := range av {
+			if avi != bv[i] {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 func needsRecreate(
 	ctx context.Context,
 	client Client,
@@ -192,15 +246,16 @@ func needsRecreate(
 		return false, fmt.Errorf("find image with label=%q: %w", policy.Image, errInspect)
 	}
 
-	imageID := image.ID
-
-	return container.Name != policy.Name ||
+	needsRecreate := container.Name != policy.Name ||
 		(policy.Hostname.Valid() && container.Hostname != policy.Hostname.Unwrap()) ||
-		container.Image != imageID ||
+		container.Image != image.ID ||
 		!elementsMatch(container.Networks, policy.Networks) ||
 		!elementsMatch(container.Volumes, policy.Volumes) ||
 		(policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap()) ||
-		(policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd)), nil
+		(policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd)) ||
+		!compareMaps(container.Env, policy.Env) ||
+		!compareMapsOfSlices(container.PortBindings, policy.PortBindings)
+	return needsRecreate, nil
 }
 
 func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
@@ -248,20 +303,22 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 		}
 	}
 
-	container, errCreate := c.client.ContainerCreate(
-		ctx,
+	container, errCreate := c.client.ContainerCreate(ctx,
 		&container.Config{ //nolint:exhaustruct // not all options are needed
 			Hostname: policy.Hostname.OrDefault(""),
 			Image:    policy.Image,
 			Volumes: fun.ToMap(policy.Volumes, func(volume string) (string, struct{}) {
 				return volume, struct{}{}
 			}),
-			Cmd:          policy.Cmd.OrDefault(nil),
-			Env:          []string{},    // TODO: fill from arg
+			Cmd: policy.Cmd.OrDefault(nil),
+			Env: fun.ToSlice(policy.Env, func(name, value string) string {
+				return fmt.Sprintf("%s=%s", name, value)
+			}),
 			ExposedPorts: nat.PortSet{}, // TODO: fill from arg
 		},
 		&container.HostConfig{ //nolint:exhaustruct // not all options are needed
 			RestartPolicy: restartPolicy,
+			PortBindings:  policy.PortBindings,
 		},
 		nil, // TODO: fill networks from cfg
 		nil,
