@@ -38,6 +38,27 @@ const (
 	ContainerStateDead
 )
 
+func (state ContainerState) String() string {
+	switch state {
+	case ContainerStateCreated:
+		return "created"
+	case ContainerStateRunning:
+		return "running"
+	case ContainerStatePaused:
+		return "paused"
+	case ContainerStateRestarting:
+		return "restarting"
+	case ContainerStateRemoving:
+		return "removing"
+	case ContainerStateExited:
+		return "exited"
+	case ContainerStateDead:
+		return "dead"
+	default:
+		return "unknown"
+	}
+}
+
 type ContainerID string
 
 type ContainerConfig struct {
@@ -76,6 +97,8 @@ func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerCo
 
 		var state ContainerState
 		switch details.State.Status {
+		case "created":
+			state = ContainerStateCreated
 		case "running":
 			state = ContainerStateRunning
 		case "paused":
@@ -240,22 +263,48 @@ func needsRecreate(
 	client Client,
 	container ContainerConfig,
 	policy ContainerPolicy,
-) (bool, error) {
+) (map[string]string, error) {
 	image, _, errInspect := client.client.ImageInspectWithRaw(ctx, policy.Image)
 	if errInspect != nil {
-		return false, fmt.Errorf("find image with label=%q: %w", policy.Image, errInspect)
+		return nil, fmt.Errorf("find image with label=%q: %w", policy.Image, errInspect)
 	}
 
-	needsRecreate := container.Name != policy.Name ||
-		(policy.Hostname.Valid() && container.Hostname != policy.Hostname.Unwrap()) ||
-		container.Image != image.ID ||
-		!elementsMatch(container.Networks, policy.Networks) ||
-		!elementsMatch(container.Volumes, policy.Volumes) ||
-		(policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap()) ||
-		(policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd)) ||
-		!compareMaps(container.Env, policy.Env) ||
-		!compareMapsOfSlices(container.PortBindings, policy.PortBindings)
-	return needsRecreate, nil
+	difference := map[string]string{}
+	if container.Name != policy.Name {
+		difference["name"] = fmt.Sprintf("expected=%q actual=%q", policy.Name, container.Name)
+	}
+	if policy.Hostname.Valid() && container.Hostname != policy.Hostname.Unwrap() {
+		difference["hostname"] = fmt.Sprintf(
+			"expected=%q actual=%q",
+			policy.Hostname.Unwrap(), container.Hostname,
+		)
+	}
+	if container.Image != image.ID {
+		difference["image"] = fmt.Sprintf("expected=%q actual=%q", image.ID, container.Image)
+	}
+	if !elementsMatch(container.Networks, policy.Networks) {
+		difference["networks"] = fmt.Sprintf("expected=%v actual=%v", policy.Networks, container.Networks)
+	}
+	if !elementsMatch(container.Volumes, policy.Volumes) {
+		difference["volumes"] = fmt.Sprintf("expected=%v actual=%v", policy.Volumes, container.Volumes)
+	}
+	if policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap() {
+		difference["restart policy"] = fmt.Sprintf(
+			"expected=%q actual=%q",
+			policy.RestartPolicy.Unwrap(), container.RestartPolicy,
+		)
+	}
+	if policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd) {
+		difference["cmd"] = fmt.Sprintf("expected=%v actual=%v", policy.Cmd.Unwrap(), container.Cmd)
+	}
+	if !compareMaps(container.Env, policy.Env) {
+		difference["env"] = fmt.Sprintf("expected=%v actual=%v", policy.Env, container.Env)
+	}
+	if !compareMapsOfSlices(container.PortBindings, policy.PortBindings) {
+		difference["port bindings"] = fmt.Sprintf("expected=%v actual=%v", policy.PortBindings, container.PortBindings)
+	}
+
+	return difference, nil
 }
 
 func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
@@ -382,7 +431,7 @@ func (c Client) ContainerRestart(ctx context.Context, containerID ContainerID) e
 	return nil
 }
 
-// TODO: return actions list instead
+// TODO: return actions list instead, dry run
 func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 	ctx context.Context,
 	client Client,
@@ -391,9 +440,11 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 ) error {
 	if !containerMaybe.Valid() {
 		if policy.State == ContainerDesiredStateAbsent {
+			log.Info("no container found, as expected")
 			return nil
 		}
 
+		log.Info("no container found, creating and running it")
 		if errRun := client.ContainerRun(ctx, policy); errRun != nil {
 			return fmt.Errorf("no container found, creating and running it: %w", errRun)
 		}
@@ -401,12 +452,43 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 
 	container := containerMaybe.Unwrap()
 
-	recreate, err := needsRecreate(ctx, client, container, policy)
-	if err != nil {
-		return fmt.Errorf("check needs recreate: %w", err)
-	} else if recreate {
-		// TODO: if remove stops container, it doesn't need to be stopped beforehand
-		return nil // TODO: recreate = stop, remove, run
+	log.Infof("reconciling", log.F{
+		"container_id":    container.ID,
+		"container_state": container.State.String(),
+		"policy_state":    policy.State,
+	})
+
+	diff, errCheckRecreate := needsRecreate(ctx, client, container, policy)
+	if errCheckRecreate != nil {
+		return fmt.Errorf("check needs recreate: %w", errCheckRecreate)
+	}
+
+	if len(diff) > 0 {
+		log.Infof("container needs to be recreated", log.F{
+			"container_id": container.ID,
+			"diff":         diff,
+		})
+
+		if errStop := client.ContainerStop(ctx, container.ID); errStop != nil {
+			return fmt.Errorf("stop old container: %w", errStop)
+		}
+
+		if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
+			return fmt.Errorf("remove old container: %w", errRemove)
+		}
+
+		newContainerID, errCreate := client.ContainerCreate(ctx, policy)
+		if errCreate != nil {
+			return fmt.Errorf("create container: %w", errCreate)
+		}
+
+		if policy.State != ContainerDesiredStateStarted {
+			if errStart := client.ContainerStart(ctx, newContainerID); errStart != nil {
+				return fmt.Errorf("start container: %w", errStart)
+			}
+		}
+
+		return nil
 	}
 
 	switch policy.State {
@@ -471,6 +553,10 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateRemoving, ContainerStateExited:
 			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
+			log.Infof("container running, stopping it", log.F{
+				"container_id": container.ID,
+			})
+
 			if errStop := client.ContainerStop(ctx, container.ID); errStop != nil {
 				return fmt.Errorf("container %s running, stopping it: %w", container.ID, errStop)
 			}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +20,8 @@ const (
 	_agentExecutable = "mk-agent"
 )
 
+var errRemoteAgentNotFound = errors.New("mk-agent is not installed remotely")
+
 func getRemoteAgentHash(
 	ctx context.Context,
 	conn ssh.Connection,
@@ -33,7 +36,7 @@ func getRemoteAgentHash(
 	if errAgentVersion != nil {
 		if strings.Contains(string(stderr), "sha256sum: mk-agent: No such file or directory") {
 			l.Info("mk-agent is not installed remotely")
-			return "", nil // TODO: not found error
+			return "", errRemoteAgentNotFound
 		}
 
 		return "", fmt.Errorf("get actual mk-agent version: %w", errAgentVersion)
@@ -67,9 +70,10 @@ func BuildLocally(ctx context.Context) error {
 }
 
 func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
-	if errBuild := BuildLocally(ctx); errBuild != nil {
-		return nil, fmt.Errorf("build agent: %w", errBuild)
-	}
+	// TODO: uncomment
+	// if errBuild := BuildLocally(ctx); errBuild != nil {
+	// 	return nil, fmt.Errorf("build agent: %w", errBuild)
+	// }
 
 	agentFile, errOpen := os.Open(_agentExecutable)
 	if errOpen != nil {
@@ -82,6 +86,10 @@ func getAgentBinary(ctx context.Context) (io.ReadCloser, error) {
 func remoteNeedsToBeUpdated(ctx context.Context, conn ssh.Connection) (bool, error) {
 	remoteHash, errLocalHash := getRemoteAgentHash(ctx, conn)
 	if errLocalHash != nil {
+		if errors.Is(errLocalHash, errRemoteAgentNotFound) {
+			return true, nil
+		}
+
 		return false, errLocalHash
 	}
 
