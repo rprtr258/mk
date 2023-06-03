@@ -6,6 +6,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docker/docker v20.10.24+incompatible
 	github.com/docker/go-connections v0.4.0
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/pkg/sftp v1.13.5
 	github.com/rprtr258/fun v0.0.3
 	github.com/rprtr258/log v0.0.5

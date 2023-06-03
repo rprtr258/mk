@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
 
@@ -38,8 +37,10 @@ func Query[T any](
 		return fun.Zero[T](), errInstall
 	}
 
+	fullCmd := shellquote.Join(append([]string{"./mk-agent"}, cmd...)...)
+
 	// TODO: gzip args, validate args length, chunk args
-	stdout, stderr, errRun := agent.conn.Run(ctx, strings.Join(append([]string{"./mk-agent"}, cmd...), " "))
+	stdout, stderr, errRun := agent.conn.Run(ctx, fullCmd)
 	if errRun != nil {
 		return fun.Zero[T](), fmt.Errorf("agent call, cmd=%v, stderr=%q: %w", cmd, string(stderr), errRun)
 	}
@@ -69,10 +70,8 @@ func Execute[T any](
 		return fmt.Errorf("json marshal arg=%+v: %w", arg, errMarshal)
 	}
 
-	args := append([]string{"./mk-agent"}, cmd...)
 	// TODO: gzip args, validate args length, chunk args
-	args = append(args, strconv.Quote(string(argBytes)))
-	fullCmd := strings.Join(args, " ")
+	fullCmd := shellquote.Join(append(append([]string{"./mk-agent"}, cmd...), string(argBytes))...)
 
 	if errInstall := installAgent(ctx, agent.conn); errInstall != nil {
 		return errInstall

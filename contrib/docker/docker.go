@@ -7,7 +7,10 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	dockerClient "github.com/docker/docker/client"
+	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 	"github.com/rprtr258/fun"
 	"github.com/rprtr258/log"
@@ -62,14 +65,12 @@ func (state ContainerState) String() string {
 type ContainerID string
 
 type ContainerConfig struct {
-	ID       ContainerID
-	Name     string
-	Hostname string
-	Image    string
-	Networks []struct {
-		Name string
-	}
-	Volumes       []string
+	ID            ContainerID
+	Name          string
+	Hostname      string
+	Image         string
+	Networks      []string
+	Volumes       []Mount
 	RestartPolicy RestartPolicy
 	State         ContainerState
 	Cmd           []string
@@ -135,9 +136,15 @@ func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerCo
 			Name:     details.Name[1:], // strip leading slash
 			Hostname: details.Config.Hostname,
 			// TODO: store label instead?
-			Image:         details.Image, // TODO: image hash
-			Networks:      nil,           // TODO: fill
-			Volumes:       fun.Keys(details.Config.Volumes),
+			Image:    details.Image,                              // TODO: image hash
+			Networks: fun.Keys(details.NetworkSettings.Networks), // TODO: fill
+			Volumes: fun.Map(details.Mounts, func(m types.MountPoint) Mount {
+				return Mount{
+					Source:   m.Source,
+					Target:   m.Destination,
+					ReadOnly: !m.RW,
+				}
+			}),
 			RestartPolicy: restartPolicy,
 			State:         state,
 			Cmd:           details.Config.Cmd,
@@ -179,14 +186,18 @@ const (
 	RestartPolicyAlways
 )
 
+type Mount struct {
+	Source   string
+	Target   string
+	ReadOnly bool
+}
+
 type ContainerPolicy struct {
-	Name     string
-	Hostname fun.Option[string]
-	Image    string
-	Networks []struct {
-		Name string
-	}
-	Volumes       []string
+	Name          string
+	Hostname      fun.Option[string]
+	Image         string
+	Networks      []string
+	Volumes       []Mount
 	RestartPolicy fun.Option[RestartPolicy]
 	State         ContainerDesiredState
 	Cmd           fun.Option[[]string]
@@ -266,7 +277,13 @@ func needsRecreate(
 ) (map[string]string, error) {
 	image, _, errInspect := client.client.ImageInspectWithRaw(ctx, policy.Image)
 	if errInspect != nil {
-		return nil, fmt.Errorf("find image with label=%q: %w", policy.Image, errInspect)
+		if !errdefs.IsNotFound(errInspect) {
+			return nil, fmt.Errorf("find image with label=%q: %w", policy.Image, errInspect)
+		}
+
+		if errPull := client.ImagePull(ctx, policy.Image); errPull != nil {
+			return nil, fmt.Errorf("image not found, pulling %q: %w", policy.Image, errPull)
+		}
 	}
 
 	difference := map[string]string{}
@@ -297,7 +314,7 @@ func needsRecreate(
 	if policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd) {
 		difference["cmd"] = fmt.Sprintf("expected=%v actual=%v", policy.Cmd.Unwrap(), container.Cmd)
 	}
-	if !compareMaps(container.Env, policy.Env) { // TODO: ignore PATH env if it is not specified explicitly
+	if policy.Env != nil && !compareMaps(container.Env, policy.Env) { // TODO: ignore PATH env if it is not specified explicitly
 		difference["env"] = fmt.Sprintf("expected=%v actual=%v", policy.Env, container.Env)
 	}
 	if !compareMapsOfSlices(container.PortBindings, policy.PortBindings) {
@@ -346,10 +363,7 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 		&container.Config{ //nolint:exhaustruct // not all options are needed
 			Hostname: policy.Hostname.OrDefault(""),
 			Image:    policy.Image,
-			Volumes: fun.ToMap(policy.Volumes, func(volume string) (string, struct{}) {
-				return volume, struct{}{}
-			}),
-			Cmd: policy.Cmd.OrDefault(nil),
+			Cmd:      policy.Cmd.OrDefault(nil),
 			Env: fun.ToSlice(policy.Env, func(name, value string) string {
 				return fmt.Sprintf("%s=%s", name, value)
 			}),
@@ -358,8 +372,29 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 		&container.HostConfig{ //nolint:exhaustruct // not all options are needed
 			RestartPolicy: restartPolicy,
 			PortBindings:  policy.PortBindings,
+			Mounts: fun.Map(policy.Volumes, func(volume Mount) mount.Mount {
+				return mount.Mount{
+					Type:          mount.TypeBind,
+					Source:        volume.Source,
+					Target:        volume.Target,
+					ReadOnly:      true,
+					Consistency:   mount.ConsistencyFull,
+					BindOptions:   nil,
+					VolumeOptions: nil,
+					TmpfsOptions:  nil,
+				}
+			}),
 		},
-		nil, // TODO: fill networks from cfg
+		&network.NetworkingConfig{ //nolint:exhaustruct // not all options are needed
+			EndpointsConfig: fun.ToMap(
+				policy.Networks,
+				func(networkName string) (string, *network.EndpointSettings) {
+					return networkName, &network.EndpointSettings{
+						NetworkID: networkName,
+					}
+				}),
+			// TODO: fill networks from cfg
+		},
 		nil,
 		policy.Name,
 	)
