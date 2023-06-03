@@ -7,7 +7,7 @@ require (
 	github.com/docker/docker v20.10.24+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/pkg/sftp v1.13.5
-	github.com/rprtr258/fun v0.0.2
+	github.com/rprtr258/fun v0.0.3
 	github.com/rprtr258/log v0.0.5
 	github.com/urfave/cli/v2 v2.25.3
 	go.uber.org/multierr v1.11.0

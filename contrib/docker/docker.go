@@ -307,16 +307,6 @@ func needsRecreate(
 	return difference, nil
 }
 
-func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
-	return c.client.ContainerStart( //nolint:wrapcheck // lazy
-		ctx,
-		string(containerID),
-		types.ContainerStartOptions{
-			CheckpointID:  "",
-			CheckpointDir: "",
-		})
-}
-
 func (c Client) ImagePull(ctx context.Context, label string) error {
 	r, errPull := c.client.ImagePull(ctx, label, types.ImagePullOptions{}) //nolint:exhaustruct // no options
 	if errPull != nil {
@@ -380,6 +370,17 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 	return ContainerID(container.ID), nil
 }
 
+func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
+	log.Debugf("starting container", log.F{"container_id": containerID})
+	return c.client.ContainerStart( //nolint:wrapcheck // lazy
+		ctx,
+		string(containerID),
+		types.ContainerStartOptions{
+			CheckpointID:  "",
+			CheckpointDir: "",
+		})
+}
+
 func (c Client) ContainerRun(ctx context.Context, policy ContainerPolicy) error {
 	containerID, errCreate := c.ContainerCreate(ctx, policy)
 	if errCreate != nil {
@@ -394,6 +395,7 @@ func (c Client) ContainerRun(ctx context.Context, policy ContainerPolicy) error 
 }
 
 func (c Client) ContainerStop(ctx context.Context, containerID ContainerID) error {
+	log.Debugf("stopping container", log.F{"container_id": containerID})
 	if errStop := c.client.ContainerStop(ctx, string(containerID), nil); errStop != nil {
 		return fmt.Errorf("stop container %q: %w", containerID, errStop)
 	}
@@ -473,16 +475,16 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 			return fmt.Errorf("stop old container: %w", errStop)
 		}
 
-		if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
-			return fmt.Errorf("remove old container: %w", errRemove)
-		}
+		// if errRemove := client.ContainerRemove(ctx, container.ID); errRemove != nil {
+		// 	return fmt.Errorf("remove old container: %w", errRemove)
+		// }
 
 		newContainerID, errCreate := client.ContainerCreate(ctx, policy)
 		if errCreate != nil {
 			return fmt.Errorf("create container: %w", errCreate)
 		}
 
-		if policy.State != ContainerDesiredStateStarted {
+		if policy.State == ContainerDesiredStateStarted {
 			if errStart := client.ContainerStart(ctx, newContainerID); errStart != nil {
 				return fmt.Errorf("start container: %w", errStart)
 			}
