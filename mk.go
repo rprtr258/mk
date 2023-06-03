@@ -135,7 +135,7 @@ func (s System) String(key ResourceKey) (string, error) {
 func (s System) Build(taskKey string) ([]Resource, error) {
 	task, ok := s.Tasks[taskKey]
 	if !ok {
-		return nil, fmt.Errorf("%q task was not found\n", taskKey)
+		return nil, fmt.Errorf("%q task was not found", taskKey)
 	}
 
 	resources, err := task.Action(s)
