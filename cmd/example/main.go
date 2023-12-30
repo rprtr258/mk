@@ -4,15 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/davecgh/go-spew/spew"
-	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 
 	"github.com/rprtr258/mk"
 	"github.com/rprtr258/mk/agent"
-	"github.com/rprtr258/mk/contrib/docker"
-	"github.com/rprtr258/mk/ssh"
 )
 
 func main() {
@@ -474,6 +470,6 @@ $(eval name=$(shell gum input --placeholder "migration name"))
 			},
 		},
 	}).Run(os.Args); err != nil {
-		log.Fatal(err.Error())
+		log.Fatal().Err(err).Send()
 	}
 }

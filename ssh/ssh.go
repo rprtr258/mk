@@ -9,7 +9,8 @@ import (
 	"os"
 
 	"github.com/pkg/sftp"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"go.uber.org/multierr"
 	"golang.org/x/crypto/ssh"
 )
@@ -21,7 +22,7 @@ type Connection struct {
 	user string
 	host string
 
-	l log.Logger
+	l zerolog.Logger
 }
 
 func NewConnection(user, host string, privateKey []byte) (Connection, error) {
@@ -55,7 +56,12 @@ func NewConnection(user, host string, privateKey []byte) (Connection, error) {
 		sftp:   sftp,
 		user:   user,
 		host:   host,
-		l:      log.Tag("ssh").With(log.F{"user": user, "host": host}),
+		l: log.Logger.
+			With().
+			Str("component", "ssh").
+			Str("user", user).
+			Str("host", host).
+			Logger(),
 	}, nil
 }
 
@@ -91,21 +97,21 @@ func (conn Connection) Run(ctx context.Context, cmd string) ( //nolint:nonamedre
 	}
 	done := make(chan result)
 	go func() {
-		conn.l.Debugf("executing command remotely", log.F{"command": cmd})
+		conn.l.Debug().Str("command", cmd).Msg("executing command remotely")
 		errCmd := sess.Run(cmd)
 		if errCmd != nil {
-			conn.l.Debugf("command failed", log.F{
-				"command": cmd,
-				"stdout":  outB.String(),
-				"stderr":  errB.String(),
-				"error":   errCmd.Error(),
-			})
+			conn.l.Debug().
+				Str("command", cmd).
+				Str("stdout", outB.String()).
+				Str("stderr", errB.String()).
+				Err(errCmd).
+				Msg("command failed")
 		} else {
-			conn.l.Debugf("command finished", log.F{
-				"command": cmd,
-				"stdout":  outB.String(),
-				"stderr":  errB.String(),
-			})
+			conn.l.Debug().
+				Str("command", cmd).
+				Str("stdout", outB.String()).
+				Str("stderr", errB.String()).
+				Msg("command finished")
 		}
 		done <- result{
 			stdout: outB.Bytes(),
@@ -137,7 +143,7 @@ func (conn Connection) Upload(r io.Reader, remotePath string, mode os.FileMode) 
 		return fmt.Errorf("chmod path=%q mode=%v: %w", remotePath, mode, errChmod)
 	}
 
-	conn.l.Debugf("uploading file", log.F{"remotePath": remotePath})
+	conn.l.Debug().Str("remotePath", remotePath).Msg("uploading file")
 	if _, errUpload := dstFile.ReadFrom(r); errUpload != nil {
 		return fmt.Errorf("write to remote file %q: %w", remotePath, errUpload)
 	}

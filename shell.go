@@ -11,19 +11,19 @@ import (
 	"strings"
 
 	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 )
 
 func run(ctx context.Context, env map[string]string, stdout, stderr io.Writer, cmd string, args ...string) error {
 	c := exec.CommandContext(ctx, cmd, args...)
-	c.Env = append(os.Environ(), fun.ToSlice(env, func(k, v string) string {
+	c.Env = append(os.Environ(), fun.MapToSlice(env, func(k, v string) string {
 		return k + "=" + v
 	})...)
 	c.Stderr = stderr
 	c.Stdout = stdout
 	c.Stdin = os.Stdin
 
-	log.Debugf("executing command", log.F{"cmd": cmd, "args": args})
+	log.Debug().Str("cmd", cmd).Strs("args", args).Msg("executing command")
 
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("cmd %q %v: %w", cmd, args, err)

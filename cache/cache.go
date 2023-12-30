@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 )
 
 // TODO: add thread safety
@@ -48,7 +48,7 @@ func LoadFromFile[K comparable, V any](filename string) Cache[K, V] {
 			return map[K]V{}
 		}
 
-		log.Warnf("can't open cache file", log.F{"filename": filename, "err": err.Error()})
+		log.Warn().Str("filename", filename).Err(err).Msg("can't open cache file")
 		return map[K]V{}
 	}
 	defer file.Close()
@@ -59,19 +59,19 @@ func LoadFromFile[K comparable, V any](filename string) Cache[K, V] {
 func Load[K comparable, V any](r io.Reader) Cache[K, V] {
 	var items cacheItems[K, V]
 	if err := json.NewDecoder(r).Decode(&items); err != nil {
-		log.Warnf("invalid cache file, try running prune command to reset it", log.F{"err": err.Error()})
+		log.Warn().Err(err).Msg("invalid cache file, try running prune command to reset it")
 		return map[K]V{}
 	}
 
-	return fun.ToMap(items, func(elem cacheItem[K, V]) (K, V) {
+	return fun.SliceToMap[K, V](func(elem cacheItem[K, V]) (K, V) {
 		return elem.K, elem.V
-	})
+	}, items...)
 }
 
 func SaveToFile[K comparable, V any](filename string, cache Cache[K, V]) {
 	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
-		log.Warnf("can't open cache file", log.F{"filename": filename, "err": err.Error()})
+		log.Warn().Str("filename", filename).Err(err).Msg("can't open cache file")
 		return
 	}
 	defer file.Close()
@@ -80,13 +80,13 @@ func SaveToFile[K comparable, V any](filename string, cache Cache[K, V]) {
 }
 
 func Save[K comparable, V any](w io.Writer, cache Cache[K, V]) {
-	if err := json.NewEncoder(w).Encode(fun.ToSlice(cache, func(k K, v V) cacheItem[K, V] {
+	if err := json.NewEncoder(w).Encode(fun.MapToSlice(cache, func(k K, v V) cacheItem[K, V] {
 		return cacheItem[K, V]{
 			K: k,
 			V: v,
 		}
 	})); err != nil {
-		log.Warnf("save cache failed", log.F{"err": err.Error()})
+		log.Warn().Err(err).Msg("save cache failed")
 	}
 }
 

@@ -32,7 +32,7 @@ type MkdirOptions struct {
 }
 
 func NewMkdir(opts MkdirOptions) Action {
-	perm := fun.If(opts.Perm != 0, opts.Perm, DefaultDirPerm)
+	perm := fun.IF(opts.Perm != 0, opts.Perm, DefaultDirPerm)
 
 	return &mkdir{
 		dirname:    opts.Dirname,

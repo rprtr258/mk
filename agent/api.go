@@ -7,7 +7,7 @@ import (
 
 	"github.com/kballard/go-shellquote"
 	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 
 	"github.com/rprtr258/mk/contrib/docker"
 	"github.com/rprtr258/mk/ssh"
@@ -83,7 +83,7 @@ func Execute[T any](
 	}
 
 	if len(stdout) != 0 {
-		log.Infof(string(stdout), log.F{"cmd": cmd})
+		log.Info().Strs("cmd", cmd).Msg(string(stdout))
 	}
 
 	return nil

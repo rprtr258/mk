@@ -3,50 +3,49 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
-	"go.uber.org/multierr"
 
-	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
 	"github.com/rprtr258/mk/cache"
 )
 
 type Key struct {
-	I, J int
+	I, J string
 }
 
 type runner struct {
 	cache cache.Cache[Key, int]
 }
 
-func (k runner) distance(a, b string, i, j int) int {
-	return k.cache.GetOrEval(Key{i, j}, func() int {
+func (k runner) distance(a, b []rune) int {
+	return k.cache.GetOrEval(Key{string(a), string(b)}, func() int {
 		switch {
-		case j == 0:
-			return i
-		case i == 0:
-			return j
+		case len(b) == 0:
+			return len(a)
+		case len(a) == 0:
+			return len(b)
 		default:
-			replaceCost := k.distance(a, b, i-1, j-1)
-			if a[i-1] == b[j-1] {
-				return replaceCost
+			replace := k.distance(a[:len(a)-1], b[:len(b)-1])
+			if a[len(a)-1] == b[len(b)-1] {
+				return replace
 			}
 
-			insertCost := k.distance(a, b, i, j-1) + 1
-			deleteCost := k.distance(a, b, i-1, j) + 1
-
-			return fun.Min(replaceCost+1, insertCost, deleteCost)
+			return min(
+				replace+1,
+				k.distance(a, b[:len(b)-1])+1,
+				k.distance(a[:len(a)-1], b)+1,
+			)
 		}
 	})
 }
 
-func getCacheFilename(a, b string) string {
-	return fmt.Sprintf(".%q_%q.editcache.json", a, b)
-}
-
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+
+	const cacheFile = ".editcache.json"
+
 	if err := (&cli.App{ //nolint:exhaustruct // daaaaa
 		Name:  "edit",
 		Usage: "edit distance runner",
@@ -55,22 +54,15 @@ func main() {
 				Name:  "prune",
 				Usage: "remove cache",
 				Action: func(*cli.Context) error {
-					files, err := filepath.Glob(".*_*.editcache.json")
-					if err != nil {
-						return fmt.Errorf("glob: %w", err)
-					}
-
-					var merr error
-					for _, file := range files {
-						if errRm := os.Remove(file); errRm != nil {
-							if os.IsNotExist(errRm) {
-								continue
-							}
-
-							multierr.AppendInto(&merr, fmt.Errorf("rm cachefile %q: %w", file, errRm))
+					if err := os.Remove(cacheFile); err != nil {
+						if os.IsNotExist(err) {
+							return nil
 						}
+
+						return fmt.Errorf("rm cachefile %q: %w", cacheFile, err)
 					}
-					return merr
+
+					return nil
 				},
 			},
 			{
@@ -86,11 +78,11 @@ func main() {
 					a, b := args[0], args[1]
 
 					return cache.WithCache( //nolint:wrapcheck // daaaaaa
-						getCacheFilename(a, b),
+						cacheFile,
 						func(c cache.Cache[Key, int]) error {
-							distance := runner{c}.distance(a, b, len(a), len(b))
+							distance := runner{c}.distance([]rune(a), []rune(b))
 
-							log.Infof("distance found", log.F{"distance": distance})
+							log.Info().Int("distance", distance).Msg("distance found")
 
 							return nil
 						},
@@ -99,6 +91,6 @@ func main() {
 			},
 		},
 	}).Run(os.Args); err != nil {
-		log.Fatal(err.Error())
+		log.Fatal().Err(err).Send()
 	}
 }

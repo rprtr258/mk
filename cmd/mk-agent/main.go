@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 
 	"github.com/rprtr258/mk/contrib/docker"
@@ -102,6 +102,6 @@ func main() {
 			_subcommandDocker,
 		},
 	}).Run(os.Args); err != nil {
-		log.Fatal(err.Error())
+		log.Fatal().Err(err).Send()
 	}
 }

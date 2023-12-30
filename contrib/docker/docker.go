@@ -13,7 +13,7 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 )
 
 type Client struct {
@@ -138,18 +138,17 @@ func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerCo
 			// TODO: store label instead?
 			Image:    details.Image,                              // TODO: image hash
 			Networks: fun.Keys(details.NetworkSettings.Networks), // TODO: fill
-			Volumes: fun.Map(details.Mounts, func(m types.MountPoint) Mount {
+			Volumes: fun.Map[Mount](func(m types.MountPoint) Mount {
 				return Mount{
 					Source:   m.Source,
 					Target:   m.Destination,
 					ReadOnly: !m.RW,
 				}
-			}),
+			}, details.Mounts...),
 			RestartPolicy: restartPolicy,
 			State:         state,
 			Cmd:           details.Config.Cmd,
-			Env: fun.ToMap(
-				details.Config.Env,
+			Env: fun.SliceToMap[string, string](
 				func(env string) (string, string) {
 					const _partsNumber = 2 // 2 parts: key=value
 
@@ -160,6 +159,7 @@ func (c Client) ContainersList(ctx context.Context) (map[ContainerID]ContainerCo
 
 					return parts[0], parts[1]
 				},
+				details.Config.Env...,
 			),
 			PortBindings: details.HostConfig.PortBindings,
 		}
@@ -210,14 +210,14 @@ func elementsMatch[T comparable](xs, ys []T) bool {
 		return false
 	}
 
-	aSet := fun.ToMap(xs, func(elem T) (T, struct{}) {
+	aSet := fun.SliceToMap[T, struct{}](func(elem T) (T, struct{}) {
 		return elem, struct{}{}
-	})
+	}, xs...)
 
-	return fun.All(ys, func(s T) bool {
+	return fun.All(func(s T) bool {
 		_, ok := aSet[s]
 		return ok
-	})
+	}, ys...)
 }
 
 func compareLists[T comparable](xs, ys []T) bool {
@@ -290,10 +290,10 @@ func needsRecreate(
 	if container.Name != policy.Name {
 		difference["name"] = fmt.Sprintf("expected=%q actual=%q", policy.Name, container.Name)
 	}
-	if policy.Hostname.Valid() && container.Hostname != policy.Hostname.Unwrap() {
+	if policy.Hostname.Valid && container.Hostname != policy.Hostname.Value {
 		difference["hostname"] = fmt.Sprintf(
 			"expected=%q actual=%q",
-			policy.Hostname.Unwrap(), container.Hostname,
+			policy.Hostname.Value, container.Hostname,
 		)
 	}
 	if container.Image != image.ID {
@@ -305,14 +305,14 @@ func needsRecreate(
 	if !elementsMatch(container.Volumes, policy.Volumes) {
 		difference["volumes"] = fmt.Sprintf("expected=%v actual=%v", policy.Volumes, container.Volumes)
 	}
-	if policy.RestartPolicy.Valid() && container.RestartPolicy != policy.RestartPolicy.Unwrap() {
+	if policy.RestartPolicy.Valid && container.RestartPolicy != policy.RestartPolicy.Value {
 		difference["restart policy"] = fmt.Sprintf(
 			"expected=%q actual=%q",
-			policy.RestartPolicy.Unwrap(), container.RestartPolicy,
+			policy.RestartPolicy.Value, container.RestartPolicy,
 		)
 	}
-	if policy.Cmd.Valid() && !compareLists(policy.Cmd.Unwrap(), container.Cmd) {
-		difference["cmd"] = fmt.Sprintf("expected=%v actual=%v", policy.Cmd.Unwrap(), container.Cmd)
+	if policy.Cmd.Valid && !compareLists(policy.Cmd.Value, container.Cmd) {
+		difference["cmd"] = fmt.Sprintf("expected=%v actual=%v", policy.Cmd.Value, container.Cmd)
 	}
 	if policy.Env != nil && !compareMaps(container.Env, policy.Env) { // TODO: ignore PATH env if it is not specified explicitly
 		difference["env"] = fmt.Sprintf("expected=%v actual=%v", policy.Env, container.Env)
@@ -346,8 +346,8 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 	}
 
 	var restartPolicy container.RestartPolicy
-	if policy.RestartPolicy.Valid() {
-		switch policy.RestartPolicy.Unwrap() {
+	if policy.RestartPolicy.Valid {
+		switch policy.RestartPolicy.Value {
 		case RestartPolicyAlways:
 			restartPolicy.Name = "always"
 		case RestartPolicyOnFailure:
@@ -355,7 +355,7 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 		case RestartPolicyUnlessStopped:
 			restartPolicy.Name = "unless-stopped"
 		default:
-			return "", fmt.Errorf("unknown restart policy in container policy: %v", policy.RestartPolicy.Unwrap())
+			return "", fmt.Errorf("unknown restart policy in container policy: %v", policy.RestartPolicy.Value)
 		}
 	}
 
@@ -364,7 +364,7 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 			Hostname: policy.Hostname.OrDefault(""),
 			Image:    policy.Image,
 			Cmd:      policy.Cmd.OrDefault(nil),
-			Env: fun.ToSlice(policy.Env, func(name, value string) string {
+			Env: fun.MapToSlice(policy.Env, func(name, value string) string {
 				return fmt.Sprintf("%s=%s", name, value)
 			}),
 			ExposedPorts: nat.PortSet{}, // TODO: fill from arg
@@ -372,7 +372,7 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 		&container.HostConfig{ //nolint:exhaustruct // not all options are needed
 			RestartPolicy: restartPolicy,
 			PortBindings:  policy.PortBindings,
-			Mounts: fun.Map(policy.Volumes, func(volume Mount) mount.Mount {
+			Mounts: fun.Map[mount.Mount](func(volume Mount) mount.Mount {
 				return mount.Mount{
 					Type:          mount.TypeBind,
 					Source:        volume.Source,
@@ -383,16 +383,15 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 					VolumeOptions: nil,
 					TmpfsOptions:  nil,
 				}
-			}),
+			}, policy.Volumes...),
 		},
 		&network.NetworkingConfig{ //nolint:exhaustruct // not all options are needed
-			EndpointsConfig: fun.ToMap(
-				policy.Networks,
+			EndpointsConfig: fun.SliceToMap[string, *network.EndpointSettings](
 				func(networkName string) (string, *network.EndpointSettings) {
 					return networkName, &network.EndpointSettings{
 						NetworkID: networkName,
 					}
-				}),
+				}, policy.Networks...),
 			// TODO: fill networks from cfg
 		},
 		nil,
@@ -406,7 +405,7 @@ func (c Client) ContainerCreate(ctx context.Context, policy ContainerPolicy) (Co
 }
 
 func (c Client) ContainerStart(ctx context.Context, containerID ContainerID) error {
-	log.Debugf("starting container", log.F{"container_id": containerID})
+	log.Debug().Str("container_id", string(containerID)).Msg("starting container")
 	return c.client.ContainerStart( //nolint:wrapcheck // lazy
 		ctx,
 		string(containerID),
@@ -430,7 +429,7 @@ func (c Client) ContainerRun(ctx context.Context, policy ContainerPolicy) error 
 }
 
 func (c Client) ContainerStop(ctx context.Context, containerID ContainerID) error {
-	log.Debugf("stopping container", log.F{"container_id": containerID})
+	log.Debug().Str("container_id", string(containerID)).Msg("stopping container")
 	if errStop := c.client.ContainerStop(ctx, string(containerID), nil); errStop != nil {
 		return fmt.Errorf("stop container %q: %w", containerID, errStop)
 	}
@@ -438,7 +437,7 @@ func (c Client) ContainerStop(ctx context.Context, containerID ContainerID) erro
 }
 
 func (c Client) ContainerRemove(ctx context.Context, containerID ContainerID) error {
-	log.Debugf("removing container", log.F{"container_id": containerID})
+	log.Debug().Str("container_id", string(containerID)).Msg("removing container")
 	if errRemove := c.client.ContainerRemove(
 		ctx,
 		string(containerID),
@@ -475,25 +474,25 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 	policy ContainerPolicy,
 	containerMaybe fun.Option[ContainerConfig],
 ) error {
-	if !containerMaybe.Valid() {
+	if !containerMaybe.Valid {
 		if policy.State == ContainerDesiredStateAbsent {
-			log.Info("no container found, as expected")
+			log.Info().Msg("no container found, as expected")
 			return nil
 		}
 
-		log.Info("no container found, creating and running it")
+		log.Info().Msg("no container found, creating and running it")
 		if errRun := client.ContainerRun(ctx, policy); errRun != nil {
 			return fmt.Errorf("no container found, creating and running it: %w", errRun)
 		}
 	}
 
-	container := containerMaybe.Unwrap()
+	container := containerMaybe.Value
 
-	log.Infof("reconciling", log.F{
-		"container_id":    container.ID,
-		"container_state": container.State.String(),
-		"policy_state":    policy.State,
-	})
+	log.Info().
+		Str("container_id", string(container.ID)).
+		Str("container_state", container.State.String()).
+		Int("policy_state", int(policy.State)).
+		Msg("reconciling")
 
 	diff, errCheckRecreate := needsRecreate(ctx, client, container, policy)
 	if errCheckRecreate != nil {
@@ -501,10 +500,10 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 	}
 
 	if len(diff) > 0 {
-		log.Infof("container needs to be recreated", log.F{
-			"container_id": container.ID,
-			"diff":         diff,
-		})
+		log.Info().
+			Str("container_id", string(container.ID)).
+			Any("diff", diff).
+			Msg("container needs to be recreated")
 
 		if errStop := client.ContainerStop(ctx, container.ID); errStop != nil {
 			return fmt.Errorf("stop old container: %w", errStop)
@@ -590,9 +589,9 @@ func Reconcile( //nolint:funlen,gocognit,cyclop,gocyclo // fuckyou
 		case ContainerStateCreated, ContainerStatePaused, ContainerStateRemoving, ContainerStateExited:
 			return nil
 		case ContainerStateRunning, ContainerStateRestarting:
-			log.Infof("container running, stopping it", log.F{
-				"container_id": container.ID,
-			})
+			log.Info().
+				Str("container_id", string(container.ID)).
+				Msg("container running, stopping it")
 
 			if errStop := client.ContainerStop(ctx, container.ID); errStop != nil {
 				return fmt.Errorf("container %s running, stopping it: %w", container.ID, errStop)

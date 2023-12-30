@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 
 	"github.com/rprtr258/mk"
 	"github.com/rprtr258/mk/cache"
@@ -26,16 +26,17 @@ func getRemoteAgentHash(
 	ctx context.Context,
 	conn ssh.Connection,
 ) (string, error) {
-	l := log.With(log.F{
-		"host": conn.Host(),
-		"user": conn.User(),
-	}).Tag("getRemoteAgentHash")
+	l := log.With().
+		Str("host", conn.Host()).
+		Str("user", conn.User()).
+		Str("component", "getRemoteAgentHash").
+		Logger()
 
 	// TODO: behold not having sha256sum on remote
 	stdout, stderr, errAgentVersion := conn.Run(ctx, "sha256sum mk-agent")
 	if errAgentVersion != nil {
 		if strings.Contains(string(stderr), "sha256sum: mk-agent: No such file or directory") {
-			l.Info("mk-agent is not installed remotely")
+			l.Info().Msg("mk-agent is not installed remotely")
 			return "", errRemoteAgentNotFound
 		}
 
@@ -109,10 +110,10 @@ func remoteNeedsToBeUpdated(ctx context.Context, conn ssh.Connection) (bool, err
 		return false, fmt.Errorf("get local agent binary hash: %w", errLocalHash)
 	}
 
-	log.Debugf("comparing agent hashes", log.F{
-		"remoteHash": remoteHash,
-		"localHash":  localHash,
-	})
+	log.Debug().
+		Str("remoteHash", remoteHash).
+		Str("localHash", localHash).
+		Msg("comparing agent hashes")
 	return remoteHash != localHash, nil
 }
 

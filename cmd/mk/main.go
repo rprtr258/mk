@@ -6,7 +6,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/rprtr258/fun"
-	"github.com/rprtr258/log"
+	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 
 	"github.com/rprtr258/mk"
@@ -20,7 +20,7 @@ var _privateKey = readFile("/home/rprtr258/.ssh/rus_rprtr258")
 func readFile(filename string) []byte {
 	res, errKey := os.ReadFile(filename)
 	if errKey != nil {
-		log.Fatalf("read private key", log.F{"filename": filename, "err": errKey})
+		log.Fatal().Str("filename", filename).Err(errKey).Msg("read private key")
 	}
 	return res
 }
@@ -78,7 +78,7 @@ func main() {
 					}
 
 					for id, container := range containers {
-						log.Info(id)
+						log.Info().Msg(id)
 						spew.Dump(container)
 					}
 
@@ -123,6 +123,6 @@ func main() {
 			},
 		},
 	}).Run(os.Args); err != nil {
-		log.Fatal(err.Error())
+		log.Fatal().Err(err).Send()
 	}
 }
